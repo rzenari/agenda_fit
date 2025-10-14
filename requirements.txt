@@ -1,4 +1,4 @@
 streamlit
 pandas
 supabase
-# SQLAlchemy e outras libs do SQLite serão removidas
+pendulum
