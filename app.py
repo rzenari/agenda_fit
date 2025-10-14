@@ -1,10 +1,12 @@
+# app.py (FINAL)
+
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
 # IMPORTAÇÕES SEGURAS E CORRETAS:
-from database import init_supabase, salvar_agendamento, buscar_agendamento_por_pin, buscar_todos_agendamentos, buscar_agendamento_por_id, atualizar_status_agendamento
+from database import init_supabase, salvar_agendamento, buscar_agendamento_por_pin, buscar_todos_agendamentos, buscar_agendamento_por_id
 from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show, acao_admin_agendamento, buscar_agendamentos_hoje
 
 
@@ -21,11 +23,14 @@ def setup_database():
 
 db_client = setup_database()
 if db_client is None:
-    st.stop() 
+    st.stop() # Parar a execução se o DB não conectar
 
 
 # --- ROTEAMENTO E PARÂMETROS ---
+# Correção: Garante que o PIN seja uma string ou None
 pin_param = st.query_params.get("pin", [None])[0]
+if pin_param:
+    pin_param = str(pin_param)
 
 
 # Inicialização do Session State para persistir a mensagem
@@ -33,8 +38,7 @@ if 'last_agendamento_info' not in st.session_state:
     st.session_state.last_agendamento_info = None
 
 
-# --- FUNÇÃO DE AÇÃO GLOBAL (CORRIGIDA) ---
-# Esta função foi movida para o escopo global para ser usada pelos botões on_click.
+# --- FUNÇÃO DE AÇÃO GLOBAL ---
 def handle_admin_action(id_agendamento, acao):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada para o agendamento ID {id_agendamento}!")
@@ -49,7 +53,8 @@ def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via PIN (Módulo I - Cliente)."""
     st.title("🔒 Gestão do seu Agendamento")
     
-    pin = st.query_params.get("pin", [None])[0]
+    # Usa a variável pin_param já tratada
+    pin = pin_param
     
     if not pin:
         st.error("Link inválido. Acesse pelo link exclusivo enviado.")
