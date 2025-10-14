@@ -1,5 +1,4 @@
 streamlit
 pandas
-psycopg2-binary
+google-cloud-firestore # <--- Biblioteca principal do DB
 pendulum
-SQLAlchemy  # <-- ESSA LINHA PRECISA SER ADICIONADA
