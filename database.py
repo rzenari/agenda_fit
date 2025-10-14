@@ -1,9 +1,9 @@
-# database.py (VERSÃO FINAL COM LEITURA DE STRING JSON)
+# database.py (VERSÃO FINAL PARA GOOGLE FIRESTORE)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time
-import json # Biblioteca nativa para ler JSON
+from datetime import datetime
+import json # Necessário para decodificar a string JSON
 from google.cloud import firestore
 
 # --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
@@ -11,13 +11,14 @@ from google.cloud import firestore
 def get_firestore_client():
     """
     Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
-    Isso contorna o problema de parse do Streamlit TOML.
+    Isso contorna o problema de caracteres inválidos do parser TOML.
     """
     try:
         # AQUI É A MUDANÇA: Leitura da string JSON completa
+        # A chave DEVE ser chamada 'json_key_string' no Streamlit Secrets
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         
-        # O Python decodifica a string para um objeto JSON (dicionário)
+        # O Python decodifica a string LIDA DO SECRETS para um objeto JSON (dicionário)
         credenciais_dict = json.loads(json_credenciais)
 
         # Usa o dicionário decodificado para autenticar
@@ -25,14 +26,18 @@ def get_firestore_client():
     except KeyError:
         st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
         st.stop()
+    except json.JSONDecodeError as e:
+        st.error(f"Erro de formato JSON. Falha ao decodificar a chave privada. Verifique as quebras de linha na Private Key. Detalhe: {e}")
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Verifique o formato JSON. Detalhe: {e}")
+        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}")
         st.stop()
 
 db = get_firestore_client()
 COLECAO_AGENDAMENTOS = "agendamentos"
 
-# --- Funções de Operação no Banco de Dados (NoSQL) ---
+
+# --- Funções de Operação no Banco de Dados (Refatoradas para NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
     """Cria um novo documento (agendamento) no Firestore."""
@@ -48,7 +53,6 @@ def salvar_agendamento(dados: dict, pin_code: str):
     }
     
     try:
-        # O Firestore gera o ID
         db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
         return True
     except Exception as e:
@@ -58,14 +62,12 @@ def salvar_agendamento(dados: dict, pin_code: str):
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN (Query NoSQL)."""
     try:
-        # Query: SELECT * FROM agendamentos WHERE pin_code = pin_code
         docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
         
         for doc in docs:
             data = doc.to_dict()
-            data['id'] = doc.id # ID do Firestore (string)
+            data['id'] = doc.id 
             
-            # Converte a hora (TimeStamp) para datetime Python Naive
             if 'horario' in data:
                  data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             
@@ -97,7 +99,6 @@ def buscar_todos_agendamentos():
 def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
     """Atualiza o status de um agendamento específico (usa ID de documento)."""
     try:
-        # Usa o ID (string) do documento para fazer o update
         doc_ref = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento)
         doc_ref.update({'status': novo_status})
         return True
@@ -118,4 +119,3 @@ def buscar_agendamento_por_id(id_agendamento: str):
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
-
