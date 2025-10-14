@@ -1,5 +1,3 @@
-# app.py (COMPLETO COM PIN E GESTÃO ADMIN)
-
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
@@ -27,21 +25,12 @@ if db_client is None:
 
 
 # --- ROTEAMENTO E PARÂMETROS ---
-pin_param = st.query_params.get("pin", [None])[0] # Agora usa 'pin'
-# O nome do parâmetro na URL deve ser "?pin=..."
+pin_param = st.query_params.get("pin", [None])[0]
 
 
 # Inicialização do Session State para persistir a mensagem
 if 'last_agendamento_info' not in st.session_state:
     st.session_state.last_agendamento_info = None
-
-# AÇÕES RÁPIDAS DO ADMIN (nova função)
-def handle_admin_action(id_agendamento, acao):
-    if acao_admin_agendamento(id_agendamento, acao):
-        st.success(f"Ação '{acao.upper()}' registrada para o agendamento {id_agendamento}!")
-        st.rerun()
-    else:
-        st.error("Falha ao registrar a ação no sistema.")
 
 
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
@@ -128,13 +117,13 @@ def render_backoffice_admin():
                 dt_consulta = datetime.combine(data_consulta, hora_consulta)
                 
                 if horario_esta_disponivel(profissional, dt_consulta):
-                    pin_code = gerar_token_unico() # PIN CODE AQUI
+                    pin_code = gerar_token_unico() 
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     
                     if salvar_agendamento(dados, pin_code):
                         
                         link_base = f"https://agendafit.streamlit.app" 
-                        link_gestao = f"{link_base}?pin={pin_code}" # MUDANÇA: AGORA USA PIN NA URL
+                        link_gestao = f"{link_base}?pin={pin_code}"
                         
                         st.session_state.last_agendamento_info = {
                             'cliente': cliente,
@@ -142,7 +131,7 @@ def render_backoffice_admin():
                             'link_gestao': link_gestao
                         }
                         
-                        st.rerun() 
+                        st.rerun()
                     else:
                         st.error("Erro ao salvar no banco de dados. Verifique a conexão do Supabase.")
                 else:
@@ -152,7 +141,7 @@ def render_backoffice_admin():
         agenda_hoje = buscar_agendamentos_hoje()
         
         if not agenda_hoje.empty:
-            df_agenda = agenda_hoje[['id', 'horario', 'cliente', 'profissional', 'status']].copy()
+            df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status', 'id']].copy()
             df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
 
             # --- GESTÃO DA AGENDA: BOTÕES DE AÇÃO ---
@@ -160,10 +149,9 @@ def render_backoffice_admin():
                 df_agenda[['Hora', 'cliente', 'profissional', 'status', 'id']],
                 column_config={
                     "id": st.column_config.Column(width="small", label="ID"),
-                    # Adiciona uma coluna interativa para as ações
                     "Ações": st.column_config.Column("Ações", width="large")
                 },
-                on_select="default", # Adicionei on_select para evitar warnings
+                on_select="ignore", # CORREÇÃO APLICADA AQUI: Mudança para 'ignore'
                 use_container_width=True, 
                 hide_index=True,
             )
@@ -199,15 +187,15 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2 e TAB 3 permanecem iguais ---
+    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
-        # ... (código dos relatórios)
+        
         df_relatorio = get_relatorio_no_show()
         
         if not df_relatorio.empty:
             st.subheader("Taxa de No-Show Média vs. Profissional")
-            # ... (omissões por brevidade)
+            
             total_atendimentos = df_relatorio['total_atendimentos'].sum()
             total_faltas = df_relatorio['total_faltas'].sum()
             taxa_media = (total_faltas / total_atendimentos) * 100 if total_atendimentos > 0 else 0
@@ -228,6 +216,7 @@ def render_backoffice_admin():
         else:
             st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
 
+    # --- TAB 3: Configuração e Pacotes (omissões por brevidade) ---
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
         st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
@@ -240,7 +229,7 @@ def render_backoffice_admin():
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
 
-if pin_param: # Agora usa PIN PARAM
+if pin_param:
     render_agendamento_seguro()
 else:
     render_backoffice_admin()
