@@ -1,3 +1,5 @@
+# app.py (FINAL)
+
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
@@ -16,7 +18,7 @@ PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutri
 @st.cache_resource
 def setup_database():
     """Chama a função de inicialização do DB."""
-    from database import init_supabase 
+    # init_supabase é importado diretamente de database
     return init_supabase()
 
 db_client = setup_database()
@@ -70,6 +72,7 @@ def render_agendamento_seguro():
     elif agendamento:
         st.warning(f"Este agendamento já está: {agendamento['status']}. Não é possível alterar online.")
     else:
+        # Mensagem que o usuário estava recebendo:
         st.error("Token de agendamento inválido ou expirado. Por favor, contate o profissional.")
 
 
@@ -102,9 +105,6 @@ def render_backoffice_admin():
             st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
             st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{info['link_gestao']}`")
             
-            # Limpa o estado para que a mensagem suma na próxima interação, exceto o agendamento
-            # A mensagem só será exibida em seguida se um novo agendamento for feito
-            # st.session_state.last_agendamento_info = None # Comentado para manter visível até uma nova ação
 
         
         with st.form("admin_form"):
@@ -157,7 +157,7 @@ def render_backoffice_admin():
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
 
-    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
+    # --- TAB 2: Relatórios e Faltas ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
         
@@ -165,7 +165,7 @@ def render_backoffice_admin():
         
         if not df_relatorio.empty:
             st.subheader("Taxa de No-Show Média vs. Profissional")
-            # ... (restante da lógica de relatórios)
+            
             total_atendimentos = df_relatorio['total_atendimentos'].sum()
             total_faltas = df_relatorio['total_faltas'].sum()
             taxa_media = (total_faltas / total_atendimentos) * 100 if total_atendimentos > 0 else 0
@@ -186,10 +186,15 @@ def render_backoffice_admin():
         else:
             st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
 
-    # --- TAB 3: Configuração e Pacotes (omissões por brevidade) ---
+    # --- TAB 3: Configuração e Pacotes ---
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
-        st.warning("Funcionalidades avançadas em desenvolvimento.")
+        st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
+        st.markdown("""
+        **Otimizador de Pacotes:**
+        1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
+        2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
+        """)
 
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
