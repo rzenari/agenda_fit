@@ -39,10 +39,28 @@ def processar_cancelamento_seguro(pin_code: str) -> bool:
     agendamento = buscar_agendamento_por_pin(pin_code)
     
     if agendamento and agendamento['status'] == "Confirmado":
+        # Chama a função de atualização do DB
         atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
         return True
         
     return False
+
+def acao_admin_agendamento(agendamento_id: int, acao: str) -> bool:
+    """Executa ações rápidas (Finalizar/Cancelar/No-Show) pelo painel Admin."""
+    
+    status_map = {
+        "cancelar": "Cancelado (Admin)",
+        "finalizar": "Finalizado",
+        "no-show": "No-Show",
+    }
+    novo_status = status_map.get(acao)
+    
+    if novo_status:
+        # Chama a função de atualização do DB usando o ID
+        atualizar_status_agendamento(agendamento_id, novo_status)
+        return True
+    return False
+
 
 def get_relatorio_no_show() -> pd.DataFrame:
     """
