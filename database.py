@@ -2,8 +2,10 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
+import pandas as pd
 
 # Conexão com SQLite no mesmo diretório
+# IMPORTANTE: O Streamlit Cloud vai criar este arquivo no deploy
 DATABASE_URL = "sqlite:///agenda.db"
 Base = declarative_base()
 
@@ -27,7 +29,7 @@ class Agendamento(Base):
     
     # Gestão de Pacotes (Novo Recurso)
     is_pacote_sessao = Column(Boolean, default=False)
-    sessao_pacote_id = Column(String, nullable=True) # ID do grupo de sessões
+    sessao_pacote_id = Column(String, nullable=True) 
 
     def __repr__(self):
         return f"Agendamento(ID={self.id}, Cliente={self.cliente})"
@@ -45,3 +47,38 @@ def get_session():
     engine = iniciar_db()
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return SessionLocal()
+
+def salvar_agendamento(session, dados: dict, token: str):
+    """Cria um novo agendamento no DB."""
+    novo = Agendamento(
+        token_unico=token,
+        profissional=dados['profissional'],
+        cliente=dados['cliente'],
+        telefone=dados['telefone'],
+        horario=dados['horario'],
+    )
+    session.add(novo)
+    session.commit()
+    session.refresh(novo)
+    return novo
+
+def buscar_agendamento_por_token(session, token: str):
+    """Busca um agendamento específico usando o token de segurança."""
+    return session.query(Agendamento).filter(Agendamento.token_unico == token).first()
+
+def buscar_agendamentos_hoje(session, profissional: str = None):
+    """Busca todos os agendamentos confirmados para hoje."""
+    data_hoje = datetime.now().date()
+    
+    query = session.query(Agendamento).filter(Agendamento.status == "Confirmado")
+    
+    if profissional:
+        query = query.filter(Agendamento.profissional == profissional)
+        
+    # Retorna uma lista de agendamentos para a data de hoje
+    # Usamos list comprehension para filtrar pela data (porque SQLite não suporta função DATE nativamente com SQLAlchemy)
+    return [
+        agendamento 
+        for agendamento in query.all() 
+        if agendamento.horario.date() == data_hoje
+    ]
