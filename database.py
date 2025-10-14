@@ -1,25 +1,36 @@
-# database.py (VERSÃO FINAL COM GOOGLE FIRESTORE)
+# database.py (VERSÃO FINAL COM LEITURA DE STRING JSON)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, date
+from datetime import datetime, time
+import json # Biblioteca nativa para ler JSON
 from google.cloud import firestore
 
 # --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
 @st.cache_resource
 def get_firestore_client():
-    """Inicializa o cliente Firestore usando st.secrets (Service Account JSON)."""
+    """
+    Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
+    Isso contorna o problema de parse do Streamlit TOML.
+    """
     try:
-        # Lê o JSON formatado em TOML que você colou nos Secrets
-        # O Streamlit usa os dados para autenticar a Service Account
-        return firestore.Client.from_service_account_info(st.secrets["firestore"])
+        # AQUI É A MUDANÇA: Leitura da string JSON completa
+        json_credenciais = st.secrets["firestore"]["json_key_string"]
+        
+        # O Python decodifica a string para um objeto JSON (dicionário)
+        credenciais_dict = json.loads(json_credenciais)
+
+        # Usa o dicionário decodificado para autenticar
+        return firestore.Client.from_service_account_info(credenciais_dict)
+    except KeyError:
+        st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Verifique a chave JSON/TOML no secrets. Detalhe: {e}")
+        st.error(f"Erro ao conectar ao Google Firestore. Verifique o formato JSON. Detalhe: {e}")
         st.stop()
 
 db = get_firestore_client()
 COLECAO_AGENDAMENTOS = "agendamentos"
-
 
 # --- Funções de Operação no Banco de Dados (NoSQL) ---
 
@@ -107,3 +118,4 @@ def buscar_agendamento_por_id(id_agendamento: str):
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
+
