@@ -1,40 +1,25 @@
-# database.py (VERSÃO FINAL E FUNCIONAL PARA FIRESTORE)
+# database.py (VERSÃO FINAL com Retorno de Mensagem de Erro)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time, date
 import json 
 from google.cloud import firestore
 
-# --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
+# --- Inicialização da Conexão ---
 @st.cache_resource
 def get_firestore_client():
     """
-    Inicializa o cliente Firestore lendo os campos individuais dos Secrets
-    e remontando o JSON da Service Account.
+    Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
     """
     try:
-        secrets = st.secrets["firestore"]
+        # Lembre-se: 'json_key_string' deve ser o nome da chave nos Secrets
+        json_credenciais = st.secrets["firestore"]["json_key_string"]
         
-        # 1. Remontagem do dicionário de credenciais
-        credenciais_dict = {
-            "type": secrets["type"],
-            "project_id": secrets["project_id"],
-            "private_key_id": secrets["private_key_id"],
-            "client_email": secrets["client_email"],
-            "token_uri": secrets["token_uri"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_id": "NAO_NECESSARIO_PARA_AUTH", 
-            # 2. A CORREÇÃO CRÍTICA: Converter \\n (string) em \n (quebra de linha real)
-            "private_key": secrets["private_key"].replace('\\n', '\n'),
-        }
+        # O Python decodifica a string para um objeto JSON (dicionário)
+        credenciais_dict = json.loads(json_credenciais)
 
-        # 3. Usa o dicionário remontado para autenticar
         return firestore.Client.from_service_account_info(credenciais_dict)
-    except KeyError as e:
-        st.error(f"Erro Crítico: Falta o campo {e} nos Secrets. Verifique se todos os campos estão configurados.")
-        st.stop()
     except Exception as e:
         st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as permissões da Service Account.")
         st.stop()
@@ -43,11 +28,11 @@ db = get_firestore_client()
 COLECAO_AGENDAMENTOS = "agendamentos"
 
 
-# --- Funções de Operação no Banco de Dados ---
-# [O restante do código (salvar, buscar, etc.) permanece o mesmo]
+# --- Funções de Operação no Banco de Dados (NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    # ... (código de salvamento omitido)
+    """Cria um novo documento (agendamento) no Firestore e retorna True ou a string de erro."""
+    
     data_para_salvar = {
         'pin_code': str(pin_code),
         'profissional': dados['profissional'],
@@ -60,13 +45,13 @@ def salvar_agendamento(dados: dict, pin_code: str):
     
     try:
         db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
-        return True
+        return True # Sucesso
     except Exception as e:
-        print(f"ERRO AO SALVAR NO FIRESTORE: {e}")
-        return False
+        return str(e) # Retorna a mensagem de erro
+
 
 def buscar_agendamento_por_pin(pin_code: str):
-    # ... (código de busca omitido)
+    """Busca um agendamento pelo PIN (Query NoSQL)."""
     try:
         docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
         
@@ -85,7 +70,7 @@ def buscar_agendamento_por_pin(pin_code: str):
         return None
 
 def buscar_todos_agendamentos():
-    # ... (código de busca total omitido)
+    """Busca todos os agendamentos e retorna um DataFrame."""
     try:
         docs = db.collection(COLECAO_AGENDAMENTOS).stream()
         data = []
@@ -103,7 +88,7 @@ def buscar_todos_agendamentos():
 
 
 def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
-    # ... (código de atualização omitido)
+    """Atualiza o status de um agendamento específico."""
     try:
         doc_ref = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento)
         doc_ref.update({'status': novo_status})
@@ -113,7 +98,7 @@ def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
         return False
         
 def buscar_agendamento_por_id(id_agendamento: str):
-    # ... (código de busca por id omitido)
+    """Busca um agendamento pelo ID do documento do Firestore."""
     try:
         doc = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento).get()
         if doc.exists:
