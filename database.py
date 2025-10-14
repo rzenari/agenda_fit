@@ -1,4 +1,4 @@
-# database.py (CORRIGIDO)
+# database.py (CORRIGIDO PARA REMOVER TIMEZONE)
 
 import streamlit as st
 from supabase import create_client, Client
@@ -9,7 +9,7 @@ import uuid
 # --- Inicialização da Conexão ---
 @st.cache_resource
 def init_supabase() -> Client:
-    """Inicializa e armazena o cliente Supabase usando st.secrets."""
+# [Função de inicialização omitida por brevidade, permanece a mesma]
     try:
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
@@ -22,7 +22,6 @@ def init_supabase() -> Client:
         st.error(f"Erro de Conexão com Supabase. Verifique a URL/KEY. Erro: {e}")
         st.stop()
         
-# Variável de conexão Supabase
 supabase: Client = init_supabase()
 TABELA_AGENDAMENTOS = "agendamentos"
 
@@ -37,7 +36,7 @@ def salvar_agendamento(dados: dict, token: str):
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': dados['horario'].isoformat(), # Garante que a data seja salva em formato string
+        'horario': dados['horario'].isoformat(),
         'status': "Confirmado",
         'is_pacote_sessao': False 
     }
@@ -51,7 +50,8 @@ def salvar_agendamento(dados: dict, token: str):
 def buscar_agendamento_por_token(token: str):
     """
     Busca um agendamento específico usando o token de segurança.
-    CORREÇÃO: Converte a data do Supabase para datetime nativo do Python.
+    CORREÇÃO: Remove o fuso horário (timezone) do objeto datetime após a leitura
+    para compatibilidade com o app.py (que é tz-naive).
     """
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).execute()
@@ -62,9 +62,10 @@ def buscar_agendamento_por_token(token: str):
             # 1. Converte a string de data/hora para Pandas Timestamp
             timestamp = pd.to_datetime(data['horario'])
             
-            # 2. Converte o Pandas Timestamp para datetime nativo do Python (resolvendo a compatibilidade)
-            data['horario'] = timestamp.to_pydatetime()
+            # 2. Converte para datetime nativo do Python e REMOVE O TIMEZONE
+            data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
             
+            # Retorna o registro convertido como dicionário
             return data
     return None
 
@@ -74,13 +75,14 @@ def buscar_todos_agendamentos():
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").order("horario").execute()
         if response.data:
             df = pd.DataFrame(response.data)
-            # Conversão robusta de data com pd.to_datetime
             df['horario'] = pd.to_datetime(df['horario'])
+            # CRÍTICO: Remove o timezone de todas as datas para garantir a comparação no logica_negocio.py
+            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
             return df
     return pd.DataFrame()
 
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-    """Atualiza o status de um agendamento específico."""
+# [Função de atualização omitida por brevidade, permanece a mesma]
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
         return response.data
