@@ -1,25 +1,31 @@
-# logica_negocio.py (CORRIGIDO: REMOVIDA IMPORTAÇÃO OBSOLETA)
+# logica_negocio.py (CORRIGIDO)
 
 import uuid
 from datetime import datetime, date
 from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
 import pandas as pd
-# LINHA ABAIXO REMOVIDA: from sqlalchemy import extract
 
 def gerar_token_unico():
     """Gera um UUID seguro para links de gestão do cliente."""
     return str(uuid.uuid4())
 
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
-    """Verifica se o horário está livre, consultando o DB (DataFrame)."""
+    """
+    Verifica se o horário está livre, consultando o DB (DataFrame).
+    CORREÇÃO: Usa .dt.tz_localize(None) para forçar uma comparação sem fuso horário.
+    """
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
+    
+    # Prepara a data de entrada do usuário, garantindo que não tenha timezone para a comparação
+    data_hora_naive = data_hora.replace(tzinfo=None)
         
-    # Filtra por profissional, horário exato e status que bloqueiam a agenda
+    # Filtra por profissional e status
     conflito = df[
         (df['profissional'] == profissional) &
-        (df['horario'] == data_hora) &
+        # Compara a data/hora do DB (após remover o timezone) com a data/hora do usuário
+        (df['horario'].dt.tz_localize(None) == data_hora_naive) & 
         (df['status'].isin(["Confirmado", "Em Andamento"]))
     ]
     
@@ -32,7 +38,6 @@ def processar_cancelamento_seguro(token: str) -> bool:
     
     if agendamento and agendamento['status'] == "Confirmado":
         # Chama a função de atualização do DB
-        # O ID é a chave primária da linha no Supabase
         atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
         return True
         
@@ -47,13 +52,11 @@ def get_relatorio_no_show() -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
-    # Adiciona a coluna de data para filtrar sessões que já deveriam ter ocorrido
     df['horario_date'] = df['horario'].dt.date
     df = df[
         df['horario_date'] <= date.today()
     ]
     
-    # Agrupa e calcula as métricas
     df_grouped = df.groupby('profissional').agg(
         total_atendimentos=('status', 'size'),
         total_faltas=('status', lambda x: (x == 'No-Show').sum()),
@@ -61,7 +64,6 @@ def get_relatorio_no_show() -> pd.DataFrame:
         total_finalizados=('status', lambda x: (x == 'Finalizado').sum())
     )
     
-    # Cálculo da Taxa No-Show
     df_grouped['Taxa No-Show (%)'] = (
         df_grouped['total_faltas'] / df_grouped['total_atendimentos'].replace(0, 1)
     ) * 100
