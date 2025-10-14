@@ -1,11 +1,11 @@
-# app.py (CORRIGIDO PARA REMOVER st.connection)
+# app.py (AJUSTADO PARA EXIBIR O ERRO DETALHADO)
 
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# IMPORTAÇÕES CORRETAS: Removida a linha que tentava importar st.connection.
+# IMPORTAÇÕES CORRETAS
 from database import (
     get_firestore_client, salvar_agendamento, buscar_agendamento_por_pin, 
     buscar_todos_agendamentos, buscar_agendamento_por_id
@@ -20,7 +20,7 @@ from logica_negocio import (
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
 
-# Inicialização do DB (Chama o client Firestore)
+# Inicialização do DB
 db_client = get_firestore_client()
 if db_client is None:
     st.stop() 
@@ -47,8 +47,6 @@ def handle_admin_action(id_agendamento: str, acao):
 
 
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
-# ... (O restante do código de renderização permanece o mesmo)
-
 
 def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via PIN (Módulo I - Cliente)."""
@@ -134,7 +132,10 @@ def render_backoffice_admin():
                     pin_code = gerar_token_unico() 
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     
-                    if salvar_agendamento(dados, pin_code):
+                    # CHAMA A FUNÇÃO DE SALVAMENTO E CAPTURA O RETORNO
+                    resultado = salvar_agendamento(dados, pin_code)
+                    
+                    if resultado is True:
                         
                         link_base = f"https://agendafit.streamlit.app" 
                         link_gestao = f"{link_base}?pin={pin_code}" 
@@ -147,7 +148,8 @@ def render_backoffice_admin():
                         
                         st.rerun() 
                     else:
-                        st.error("Erro ao salvar no banco de dados. Verifique a conexão do Firestore.")
+                        # MUDANÇA CRÍTICA: EXIBE A MENSAGEM DE ERRO DETALHADA
+                        st.error(f"Erro ao salvar no banco de dados. Motivo: {resultado}")
                 else:
                     st.error("Horário já ocupado! Tente outro.")
         
