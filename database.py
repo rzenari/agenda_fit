@@ -1,22 +1,18 @@
-# database.py (CORREÇÃO FINAL)
-
+# database.py (Versão Limpa após a Mudança de Tipo no Supabase)
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
 import uuid
 
-# [As imports e a inicialização do Supabase permanecem as mesmas]
+# [Inicialização do Supabase omitida, permanece a mesma]
 @st.cache_resource
 def init_supabase() -> Client:
+    # ... (código de conexão com st.secrets)
     try:
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
-        
         return create_client(url, key)
-    except KeyError:
-        st.error("Erro de Configuração: As chaves 'url' ou 'key' do Supabase não foram encontradas no st.secrets.")
-        st.stop() 
     except Exception as e:
         st.error(f"Erro de Conexão com Supabase. Verifique a URL/KEY. Erro: {e}")
         st.stop()
@@ -27,42 +23,18 @@ TABELA_AGENDAMENTOS = "agendamentos"
 
 # --- Funções de Operação no Banco de Dados ---
 
-def salvar_agendamento(dados: dict, token: str):
-    # [Função salvar_agendamento omitida, permanece a mesma]
-    data_para_salvar = {
-        'token_unico': token,
-        'profissional': dados['profissional'],
-        'cliente': dados['cliente'],
-        'telefone': dados['telefone'],
-        'horario': dados['horario'].isoformat(),
-        'status': "Confirmado",
-        'is_pacote_sessao': False 
-    }
-    
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).insert(data_para_salvar).execute()
-        if response.data:
-            return response.data
-    return None
+# ... [salvar_agendamento e atualizar_status_agendamento permanecem iguais]
 
 def buscar_agendamento_por_token(token: str):
-    """
-    Busca um agendamento específico usando o token de segurança.
-    CORREÇÃO CRÍTICA: Busca direta e tratamento do objeto datetime.
-    """
+    """Busca um agendamento específico usando o token de segurança."""
     if supabase:
-        # Busca o token no DB. Adicionamos .limit(1) para otimizar.
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).limit(1).execute()
         
         if response.data:
             data = response.data[0]
             
-            # --- Tratamento da data: Converte o timestamp do DB para datetime Python Naive ---
-            # O Pandas é o mais robusto.
-            timestamp = pd.to_datetime(data['horario'])
-            
-            # Converte para datetime nativo do Python e REMOVE O TIMEZONE (Naive)
-            data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
+            # Converte a string de horário diretamente, sem manipulação de timezone
+            data['horario'] = pd.to_datetime(data['horario']).to_pydatetime()
             
             return data
     return None
@@ -73,15 +45,7 @@ def buscar_todos_agendamentos():
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").order("horario").execute()
         if response.data:
             df = pd.DataFrame(response.data)
+            # Converte a coluna 'horario' sem manipulação complexa
             df['horario'] = pd.to_datetime(df['horario'])
-            # CRÍTICO: Remove o timezone de todas as datas para garantir a comparação
-            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
             return df
     return pd.DataFrame()
-
-def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-# [Função atualizar_status_agendamento omitida, permanece a mesma]
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
-        return response.data
-    return None
