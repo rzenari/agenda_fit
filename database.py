@@ -5,7 +5,6 @@ from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
 import uuid
-import pendulum # Novo import para datas robustas
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
@@ -32,7 +31,7 @@ TABELA_AGENDAMENTOS = "agendamentos"
 def salvar_agendamento(dados: dict, token: str):
     """Cria um novo agendamento no DB Supabase."""
     
-    # IMPORTANTE: Garante que a data/hora seja formatada como ISO 8601 (o formato que o DB espera)
+    # IMPORTANTE: Garante que a data/hora seja formatada como ISO 8601
     horario_iso = dados['horario'].isoformat()
     
     data_para_salvar = {
@@ -54,23 +53,29 @@ def salvar_agendamento(dados: dict, token: str):
 def buscar_agendamento_por_token(token: str):
     """
     Busca um agendamento específico usando o token de segurança.
-    CORREÇÃO CRÍTICA: Converte o dado de volta de forma segura.
+    CORREÇÃO: Adiciona tratamento de erro na busca do token.
     """
     if supabase:
-        # A busca por tokens DEVE estar funcionando com a chave correta.
-        response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).limit(1).execute()
+        try:
+            # Busca por token
+            response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).limit(1).execute()
+            
+            if response.data:
+                data = response.data[0]
+                
+                # Conversão da data: Limpa o timezone, que era o ponto de falha
+                timestamp = pd.to_datetime(data['horario'])
+                data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
+                
+                return data
+            
+            # Retorna None se não for encontrado (Token Inválido)
+            return None
         
-        if response.data:
-            data = response.data[0]
-            
-            # --- CORREÇÃO DE DATA/HORA ---
-            # 1. Usa Pandas para converter a string do DB
-            timestamp = pd.to_datetime(data['horario'])
-            
-            # 2. Converte para datetime nativo do Python, removendo qualquer informação de fuso horário.
-            data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
-            
-            return data
+        except Exception as e:
+            # Tratamento de erro explícito para falhas na comunicação ou tipagem
+            st.error(f"Erro ao buscar agendamento por token. Detalhe: {e}")
+            return None
     return None
 
 def buscar_todos_agendamentos():
