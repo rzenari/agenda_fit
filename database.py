@@ -1,104 +1,120 @@
-# database.py (VERSÃO FINAL E MAIS ESTÁVEL)
+# database.py (VERSÃO FINAL COM ST.CONNECTION)
 
 import streamlit as st
-from supabase import create_client, Client
-from datetime import datetime
 import pandas as pd
+from datetime import datetime, date
 import uuid
+import pendulum
+from streamlit.connections import SQLConnection
 
-# --- Inicialização da Conexão ---
+# --- Inicialização da Conexão PostgreSQL (Supabase) ---
+# Usamos st.connection com o nome 'postgresql' que deve estar configurado no secrets.toml
 @st.cache_resource
-def init_supabase() -> Client:
-    """Inicializa e armazena o cliente Supabase usando st.secrets."""
+def get_connection() -> SQLConnection:
+    """Obtém a conexão SQL com o banco de dados Supabase (PostgreSQL)."""
     try:
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-        
-        return create_client(url, key)
-    except KeyError:
-        st.error("Erro de Configuração: As chaves 'url' ou 'key' do Supabase não foram encontradas no st.secrets.")
-        st.stop() 
+        conn = st.connection("postgresql", type="sql")
+        return conn
     except Exception as e:
-        st.error(f"Erro de Conexão com Supabase. Verifique a URL/KEY. Erro: {e}")
+        st.error(f"Erro ao conectar ao banco de dados (st.connection). Verifique a string de conexão no secrets.toml. Detalhe: {e}")
         st.stop()
-        
-supabase: Client = init_supabase()
+
+# Variável de conexão
+conn = get_connection()
 TABELA_AGENDAMENTOS = "agendamentos"
 
 
 # --- Funções de Operação no Banco de Dados ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo agendamento no DB Supabase usando o PIN."""
+    """Cria um novo agendamento usando query SQL pura."""
     
+    # 1. Garante que os dados estão limpos e prontos para a query
+    pin_code_str = str(pin_code)
     horario_iso = dados['horario'].isoformat()
     
-    data_para_salvar = {
-        'token_unico': str(pin_code), # Garante que o PIN seja salvo como string
-        'profissional': dados['profissional'],
-        'cliente': dados['cliente'],
-        'telefone': dados['telefone'],
-        'horario': horario_iso,
-        'status': "Confirmado",
-        'is_pacote_sessao': False 
-    }
+    # 2. Query SQL de inserção
+    query = f"""
+    INSERT INTO {TABELA_AGENDAMENTOS} (token_unico, profissional, cliente, telefone, horario, status, is_pacote_sessao)
+    VALUES ('{pin_code_str}', '{dados['profissional']}', '{dados['cliente']}', '{dados['telefone']}', '{horario_iso}', 'Confirmado', FALSE);
+    """
     
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).insert(data_para_salvar).execute()
-        if response.data:
-            return response.data
-    return None
+    try:
+        # Executa a query sem retorno (write=True)
+        conn.query(query, ttl=0, write=True)
+        return True
+    except Exception as e:
+        print(f"ERRO AO SALVAR: {e}")
+        return False
+
 
 def buscar_agendamento_por_pin(pin_code: str):
     """
-    Busca um agendamento específico usando o PIN.
-    O PIN é forçado a ser uma string na busca.
+    Busca um agendamento específico usando o PIN com query SQL pura.
+    SOLUÇÃO DO PROBLEMA: O SQL é mais confiável que a API do cliente.
     """
-    if supabase:
-        try:
-            # Busca por PIN (como string)
-            response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", str(pin_code)).limit(1).execute()
-            
-            if response.data:
-                data = response.data[0]
-                
-                # Conversão da data: Limpa o timezone
-                timestamp = pd.to_datetime(data['horario'])
-                data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
-                
-                return data
-            
-            return None
+    pin_code_str = str(pin_code)
+    query = f"""
+    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = '{pin_code_str}' LIMIT 1;
+    """
+    
+    try:
+        # Executa a query e retorna o resultado
+        df = conn.query(query, ttl=0)
         
-        except Exception as e:
-            # Captura qualquer erro de tipagem/busca e retorna None
-            print(f"ERRO DE BUSCA CRÍTICA (PIN): {e}")
-            return None
+        if not df.empty:
+            data = df.iloc[0].to_dict()
+            
+            # Conversão da data (limpeza do timezone)
+            if data['horario']:
+                data['horario'] = data['horario'].replace(tzinfo=None)
+            
+            return data
+    except Exception as e:
+        print(f"ERRO NA BUSCA POR PIN: {e}")
     return None
+
 
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos no DB e retorna um DataFrame."""
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).select("*").order("horario").execute()
-        if response.data:
-            df = pd.DataFrame(response.data)
-            df['horario'] = pd.to_datetime(df['horario'])
-            # CRÍTICO: Remove o timezone de todas as datas para garantir a comparação Naive
-            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if pd.notna(x) else x)
+    query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
+    try:
+        df = conn.query(query, ttl=0) # ttl=0 garante que não usa cache
+        
+        # Limpa o timezone para compatibilidade com o resto do código Python
+        if 'horario' in df.columns:
+            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
             return df
+    except Exception as e:
+        print(f"ERRO NA BUSCA TOTAL: {e}")
     return pd.DataFrame()
+
 
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
     """Atualiza o status de um agendamento específico."""
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
-        return response.data
-    return None
-
+    query = f"""
+    UPDATE {TABELA_AGENDAMENTOS} SET status = '{novo_status}' 
+    WHERE id = {id_agendamento};
+    """
+    try:
+        conn.query(query, ttl=0, write=True)
+        return True
+    except Exception as e:
+        print(f"ERRO AO ATUALIZAR STATUS: {e}")
+        return False
+        
 def buscar_agendamento_por_id(id_agendamento: int):
-    """Busca um agendamento pelo ID (Usado pelo Admin para ações rápidas)."""
-    if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("id", id_agendamento).limit(1).execute()
-        if response.data:
-            return response.data[0]
+    """Busca um agendamento pelo ID (usado pelo Admin para ações rápidas)."""
+    query = f"""
+    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = {id_agendamento} LIMIT 1;
+    """
+    try:
+        df = conn.query(query, ttl=0)
+        if not df.empty:
+            data = df.iloc[0].to_dict()
+            if data['horario']:
+                data['horario'] = data['horario'].replace(tzinfo=None)
+            return data
+    except Exception as e:
+        print(f"ERRO NA BUSCA POR ID: {e}")
     return None
