@@ -1,18 +1,23 @@
-# app.py (VERSÃO CORRIGIDA DA IMPORTAÇÃO)
+# app.py (AJUSTADO PARA ST.CONNECTION)
 
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# IMPORTAÇÕES SEGURAS E CORRETAS:
-from database import init_supabase, salvar_agendamento, buscar_agendamento_por_pin, buscar_todos_agendamentos, buscar_agendamento_por_id
+# IMPORTAÇÕES CORRETAS: Agora importamos diretamente do database as funções SQL
+from database import (
+    salvar_agendamento, 
+    buscar_agendamento_por_pin, 
+    buscar_todos_agendamentos, 
+    buscar_agendamento_por_id
+)
 from logica_negocio import (
     gerar_token_unico, 
     horario_esta_disponivel, 
     processar_cancelamento_seguro, 
     get_relatorio_no_show, 
-    acao_admin_agendamento, # <--- FUNÇÃO ADICIONADA AQUI
+    acao_admin_agendamento, 
     buscar_agendamentos_hoje
 )
 
@@ -21,16 +26,16 @@ from logica_negocio import (
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
 
-# Inicialização do DB (Chamando a função segura via cache_resource)
+# A função de setup do DB agora é mais simples
 @st.cache_resource
 def setup_database():
-    """Chama a função de inicialização do DB."""
-    from database import init_supabase 
-    return init_supabase()
+    """Chama a função de inicialização da conexão SQL."""
+    from database import get_connection
+    return get_connection()
 
 db_client = setup_database()
 if db_client is None:
-    st.stop() 
+    st.stop()
 
 
 # --- ROTEAMENTO E PARÂMETROS ---
@@ -65,7 +70,7 @@ def render_agendamento_seguro():
         st.error("Link inválido. Acesse pelo link exclusivo enviado.")
         return
 
-    # Busca o agendamento no DB Supabase
+    # Busca o agendamento no DB
     agendamento = buscar_agendamento_por_pin(pin)
     
     if agendamento and agendamento['status'] == "Confirmado":
