@@ -1,4 +1,4 @@
 streamlit
 pandas
-SQLAlchemy
-# requests (opcional, se for usar API real de PTAX ou WhatsApp no futuro)
+supabase
+# SQLAlchemy e outras libs do SQLite serão removidas
