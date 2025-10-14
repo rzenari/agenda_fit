@@ -94,3 +94,4 @@ def buscar_agendamentos_hoje():
         (df['status'] == 'Confirmado')
     ]
     return df_hoje.sort_values(by='horario')
+
