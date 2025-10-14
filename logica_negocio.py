@@ -1,9 +1,10 @@
-# logica_negocio.py (AJUSTADO PARA SUPABASE)
+# logica_negocio.py (Sem Alterações)
 
 import uuid
 from datetime import datetime, date
 from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
 import pandas as pd
+from sqlalchemy import extract
 
 def gerar_token_unico():
     """Gera um UUID seguro para links de gestão do cliente."""
@@ -45,11 +46,11 @@ def get_relatorio_no_show() -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
-    # Filtra sessões que já deveriam ter ocorrido ou ocorreram
     df['horario_date'] = df['horario'].dt.date
-    df = df[df['horario_date'] <= date.today()]
+    df = df[
+        df['horario_date'] <= date.today()
+    ]
     
-    # Agrupa e calcula as métricas
     df_grouped = df.groupby('profissional').agg(
         total_atendimentos=('status', 'size'),
         total_faltas=('status', lambda x: (x == 'No-Show').sum()),
@@ -57,7 +58,6 @@ def get_relatorio_no_show() -> pd.DataFrame:
         total_finalizados=('status', lambda x: (x == 'Finalizado').sum())
     )
     
-    # Cálculo da Taxa No-Show
     df_grouped['Taxa No-Show (%)'] = (
         df_grouped['total_faltas'] / df_grouped['total_atendimentos'].replace(0, 1)
     ) * 100
