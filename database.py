@@ -1,14 +1,15 @@
-# database.py (VERSÃO FINAL: FORÇANDO SCHEMA 'public.')
+# database.py (VERSÃO FINAL COM PARÂMETROS SEGUROS)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit.connections import SQLConnection
+from psycopg2.errors import UniqueViolation # Adicionando import para tratamento de erro específico
 
-# --- Inicialização da Conexão PostgreSQL (Supabase) ---
+# [Inicialização da Conexão PostgreSQL e Variáveis Omitidas, permanecem as mesmas]
 @st.cache_resource
 def get_connection() -> SQLConnection:
-    # [Código de inicialização omitido, permanece o mesmo]
+    # [Código de inicialização omitido]
     try:
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
@@ -23,28 +24,33 @@ def get_connection() -> SQLConnection:
         st.error(f"Erro ao conectar ao DB. Detalhe: {e}")
         st.stop()
 
-# Variável de conexão
 conn = get_connection()
-# MUDANÇA CRÍTICA: Incluímos o esquema 'public.' diretamente no nome da tabela
-TABELA_AGENDAMENTOS = "public.agendamentos"
+TABELA_AGENDAMENTOS = "public.agendamentos" # Nome da tabela com schema
 
 
 # --- Funções de Operação no Banco de Dados ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo agendamento usando query SQL pura."""
+    """Cria um novo agendamento usando parâmetros seguros."""
     
-    pin_code_str = str(pin_code)
-    horario_iso = dados['horario'].isoformat()
-    
-    # Query alterada para usar {TABELA_AGENDAMENTOS}
     query = f"""
     INSERT INTO {TABELA_AGENDAMENTOS} (token_unico, profissional, cliente, telefone, horario, status, is_pacote_sessao)
-    VALUES ('{pin_code_str}', '{dados['profissional']}', '{dados['cliente']}', '{dados['telefone']}', '{horario_iso}', 'Confirmado', FALSE);
+    VALUES (%(token_unico)s, %(profissional)s, %(cliente)s, %(telefone)s, %(horario)s, %(status)s, %(is_pacote_sessao)s);
     """
     
+    params = {
+        'token_unico': str(pin_code),
+        'profissional': dados['profissional'],
+        'cliente': dados['cliente'],
+        'telefone': dados['telefone'],
+        'horario': dados['horario'], # Envia o datetime; o adaptador cuida do formato SQL
+        'status': 'Confirmado',
+        'is_pacote_sessao': False 
+    }
+    
     try:
-        conn.query(query, ttl=0, write=True)
+        # Executa a query com os parâmetros separados (write=True)
+        conn.query(query, params=params, ttl=0, write=True)
         return True
     except Exception as e:
         print(f"ERRO AO SALVAR: {e}")
@@ -52,17 +58,15 @@ def salvar_agendamento(dados: dict, pin_code: str):
 
 
 def buscar_agendamento_por_pin(pin_code: str):
-    """
-    Busca um agendamento específico usando o PIN com query SQL pura.
-    """
-    pin_code_str = str(pin_code)
-    # Query alterada para usar {TABELA_AGENDAMENTOS}
+    """Busca um agendamento específico usando parâmetros seguros."""
+    
     query = f"""
-    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = '{pin_code_str}' LIMIT 1;
+    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = %(pin)s LIMIT 1;
     """
     
     try:
-        df = conn.query(query, ttl=0)
+        # Executa a query com o parâmetro PIN
+        df = conn.query(query, params={'pin': str(pin_code)}, ttl=0)
         
         if not df.empty:
             data = df.iloc[0].to_dict()
@@ -79,7 +83,7 @@ def buscar_agendamento_por_pin(pin_code: str):
 
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos no DB e retorna um DataFrame."""
-    # Query alterada para usar {TABELA_AGENDAMENTOS}
+    # Query de SELECT não precisa de parâmetros, mas mantemos o tratamento de data
     query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
     try:
         df = conn.query(query, ttl=0)
@@ -94,13 +98,18 @@ def buscar_todos_agendamentos():
 
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
     """Atualiza o status de um agendamento específico."""
-    # Query alterada para usar {TABELA_AGENDAMENTOS}
+    
     query = f"""
-    UPDATE {TABELA_AGENDAMENTOS} SET status = '{novo_status}' 
-    WHERE id = {id_agendamento};
+    UPDATE {TABELA_AGENDAMENTOS} SET status = %(status)s 
+    WHERE id = %(id_agendamento)s;
     """
+    params = {
+        'status': novo_status,
+        'id_agendamento': id_agendamento
+    }
+    
     try:
-        conn.query(query, ttl=0, write=True)
+        conn.query(query, params=params, ttl=0, write=True)
         return True
     except Exception as e:
         print(f"ERRO AO ATUALIZAR STATUS: {e}")
@@ -108,12 +117,11 @@ def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
         
 def buscar_agendamento_por_id(id_agendamento: int):
     """Busca um agendamento pelo ID (usado pelo Admin para ações rápidas)."""
-    # Query alterada para usar {TABELA_AGENDAMENTOS}
     query = f"""
-    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = {id_agendamento} LIMIT 1;
+    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = %(id)s LIMIT 1;
     """
     try:
-        df = conn.query(query, ttl=0)
+        df = conn.query(query, params={'id': id_agendamento}, ttl=0)
         if not df.empty:
             data = df.iloc[0].to_dict()
             if data['horario']:
