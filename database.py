@@ -1,10 +1,11 @@
-# database.py (COMPLETO E FINAL)
+# database.py (VERSÃO FINAL E MAIS ESTÁVEL)
 
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
 import uuid
+import pendulum # Novo import para datas robustas
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
@@ -31,12 +32,15 @@ TABELA_AGENDAMENTOS = "agendamentos"
 def salvar_agendamento(dados: dict, token: str):
     """Cria um novo agendamento no DB Supabase."""
     
+    # IMPORTANTE: Garante que a data/hora seja formatada como ISO 8601 (o formato que o DB espera)
+    horario_iso = dados['horario'].isoformat()
+    
     data_para_salvar = {
         'token_unico': token,
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': dados['horario'].isoformat(),
+        'horario': horario_iso,
         'status': "Confirmado",
         'is_pacote_sessao': False 
     }
@@ -50,18 +54,20 @@ def salvar_agendamento(dados: dict, token: str):
 def buscar_agendamento_por_token(token: str):
     """
     Busca um agendamento específico usando o token de segurança.
-    Converte a data do Supabase para datetime nativo do Python (Naive).
+    CORREÇÃO CRÍTICA: Converte o dado de volta de forma segura.
     """
     if supabase:
+        # A busca por tokens DEVE estar funcionando com a chave correta.
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).limit(1).execute()
         
         if response.data:
             data = response.data[0]
             
-            # Converte a string de horário para Pandas Timestamp
+            # --- CORREÇÃO DE DATA/HORA ---
+            # 1. Usa Pandas para converter a string do DB
             timestamp = pd.to_datetime(data['horario'])
             
-            # Converte para datetime nativo do Python e REMOVE O TIMEZONE
+            # 2. Converte para datetime nativo do Python, removendo qualquer informação de fuso horário.
             data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
             
             return data
@@ -74,8 +80,8 @@ def buscar_todos_agendamentos():
         if response.data:
             df = pd.DataFrame(response.data)
             df['horario'] = pd.to_datetime(df['horario'])
-            # CRÍTICO: Remove o timezone de todas as datas para garantir a comparação
-            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
+            # CRÍTICO: Remove o timezone de todas as datas para garantir a comparação Naive
+            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if pd.notna(x) else x)
             return df
     return pd.DataFrame()
 
