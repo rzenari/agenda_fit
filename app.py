@@ -1,18 +1,39 @@
-# app.py (AJUSTADO PARA SUPABASE)
-
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# Importa as lógicas e o NOVO DB Supabase
-from database import salvar_agendamento, buscar_agendamento_por_token, buscar_todos_agendamentos
-from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show, buscar_agendamentos_hoje
+# Importa as lógicas e o NOVO DB Supabase de forma segura com parênteses
+from database import (
+    salvar_agendamento, 
+    buscar_agendamento_por_token, 
+    buscar_todos_agendamentos
+)
+from logica_negocio import (
+    gerar_token_unico, 
+    horario_esta_disponivel, 
+    processar_cancelamento_seguro, 
+    get_relatorio_no_show, 
+    buscar_agendamentos_hoje
+)
 
 
 # --- Configuração ---
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
+
+# Inicialização do DB (Chamando a função segura via cache_resource)
+@st.cache_resource
+def setup_database():
+    """Chama a função de inicialização do DB."""
+    # A função init_supabase está dentro do database.py e é chamada aqui
+    from database import init_supabase 
+    return init_supabase()
+
+db_client = setup_database()
+if db_client is None:
+    st.stop() # Para o aplicativo se a conexão com o Supabase falhar
+
 
 # --- ROTEAMENTO E PARÂMETROS ---
 token_param = st.query_params.get("token", [None])[0]
@@ -43,7 +64,7 @@ def render_agendamento_seguro():
         with col1:
             if st.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
                 if processar_cancelamento_seguro(token):
-                    st.success("Agendamento cancelado com sucesso. Você está livre!")
+                    st.success("Agendamento cancelado com sucesso. O horário foi liberado para outro cliente.")
                     st.toast("Consulta cancelada!")
                     st.rerun() 
                 else:
@@ -92,7 +113,7 @@ def render_backoffice_admin():
             if submitted and cliente:
                 dt_consulta = datetime.combine(data_consulta, hora_consulta)
                 
-                # A lógica de agendamento está mais limpa
+                # Checagem de disponibilidade
                 if horario_esta_disponivel(profissional, dt_consulta):
                     token = gerar_token_unico()
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
@@ -105,6 +126,7 @@ def render_backoffice_admin():
                         link_gestao = f"{link_base}?token={token}"
                         
                         st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{link_gestao}`")
+                        st.rerun() # Recarrega a tela para atualizar a agenda
                     else:
                         st.error("Erro ao salvar no banco de dados. Verifique a conexão do Supabase.")
                 else:
@@ -153,6 +175,11 @@ def render_backoffice_admin():
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
         st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
+        st.markdown("""
+        **Otimizador de Pacotes:**
+        1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
+        2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
+        """)
 
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
