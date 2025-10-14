@@ -1,4 +1,5 @@
 streamlit
 pandas
-psycopg2-binary  # Novo adaptador PostgreSQL (via st.connection)
+psycopg2-binary
 pendulum
+SQLAlchemy  # <-- ESSA LINHA PRECISA SER ADICIONADA
