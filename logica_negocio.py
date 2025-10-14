@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 from database import get_session, Agendamento
-from sqlalchemy import extract
 import pandas as pd
+from sqlalchemy import extract
 
 def gerar_token_unico():
     """Gera um UUID seguro para links de gestão do cliente."""
@@ -10,10 +10,11 @@ def gerar_token_unico():
 
 def horario_esta_disponivel(session, profissional: str, data_hora: datetime) -> bool:
     """Verifica se o horário está livre, ignorando agendamentos cancelados."""
+    # Filtra por status que bloqueiam a agenda e horário exato
     conflito = session.query(Agendamento).filter(
         Agendamento.profissional == profissional,
         Agendamento.horario == data_hora,
-        Agendamento.status.in_(["Confirmado", "Em Andamento"]) # Apenas status que bloqueiam a agenda
+        Agendamento.status.in_(["Confirmado", "Em Andamento"]) 
     ).first()
     
     return conflito is None
@@ -37,29 +38,32 @@ def processar_cancelamento_seguro(token: str) -> bool:
 
 def get_relatorio_no_show() -> pd.DataFrame:
     """
-    Função Python/Pandas para calcular e retornar a taxa de No-Show.
-    (Implementação de Alto Valor)
+    Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional.
     """
     session = get_session()
     try:
-        # Puxa todos os dados de agendamento (Pode ser otimizado para produção)
+        # Puxa todos os dados de agendamento
         todos_agendamentos = pd.read_sql(session.query(Agendamento).statement, session.bind)
         
         if todos_agendamentos.empty:
             return pd.DataFrame()
         
-        # Filtra apenas os agendamentos relevantes para o cálculo de taxa
-        df = todos_agendamentos[todos_agendamentos['status'].isin(['Confirmado', 'No-Show', 'Finalizado', 'Cancelado pelo Cliente'])]
+        # Filtra agendamentos que já deveriam ter ocorrido ou ocorreram
+        df = todos_agendamentos[
+            todos_agendamentos['horario'].dt.date <= datetime.now().date()
+        ]
         
-        # Agrupa e calcula as métricas (exemplo simples)
+        # Agrupa e calcula as métricas
         df_grouped = df.groupby('profissional').agg(
-            total_atendimentos=('status', lambda x: (x.isin(['Finalizado', 'No-Show'])).sum()),
-            total_no_show=('status', lambda x: (x == 'No-Show').sum())
+            total_atendimentos=('status', 'size'),
+            total_faltas=('status', lambda x: (x == 'No-Show').sum()),
+            total_cancelados=('status', lambda x: (x == 'Cancelado pelo Cliente').sum()),
+            total_finalizados=('status', lambda x: (x == 'Finalizado').sum())
         )
         
-        # Evita divisão por zero
+        # O cálculo mais preciso é sobre o total que deveria ter ocorrido
         df_grouped['Taxa No-Show (%)'] = (
-            df_grouped['total_no_show'] / df_grouped['total_atendimentos'].replace(0, 1)
+            df_grouped['total_faltas'] / df_grouped['total_atendimentos'].replace(0, 1)
         ) * 100
         
         return df_grouped.sort_values(by='Taxa No-Show (%)', ascending=False).reset_index()
