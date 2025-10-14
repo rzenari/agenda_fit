@@ -1,29 +1,20 @@
+# app.py (AJUSTADO PARA SUPABASE)
+
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# Importa as suas lógicas e DB
-from database import get_session, salvar_agendamento, buscar_agendamentos_hoje, Agendamento, buscar_agendamento_por_token
-from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show
+# Importa as lógicas e o NOVO DB Supabase
+from database import salvar_agendamento, buscar_agendamento_por_token, buscar_todos_agendamentos
+from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show, buscar_agendamentos_hoje
 
 
-# --- Configuração Inicial ---
-
-# Inicialização do DB via cache_resource para otimização do Streamlit
-@st.cache_resource
-def setup_database():
-    """Chama a função de inicialização do DB."""
-    return get_session()
-
-db_session = setup_database()
-
-# Configurações da Página e Variáveis Globais
+# --- Configuração ---
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
 
 # --- ROTEAMENTO E PARÂMETROS ---
-# Correção: Definindo token_param no escopo global.
 token_param = st.query_params.get("token", [None])[0]
 
 
@@ -33,28 +24,26 @@ def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via token (Módulo I - Cliente)."""
     st.title("🔒 Gestão do seu Agendamento")
     
-    # Busca o token no query_params
     token = st.query_params.get("token", [None])[0]
     
     if not token:
         st.error("Token de acesso não fornecido. Acesse pelo link exclusivo enviado.")
         return
 
-    # Busca o agendamento no DB
-    agendamento = buscar_agendamento_por_token(db_session, token)
+    # Busca o agendamento no DB Supabase
+    agendamento = buscar_agendamento_por_token(token)
     
-    if agendamento and agendamento.status == "Confirmado":
-        st.info(f"Seu agendamento com {agendamento.profissional} está CONFIRMADO para:")
-        st.subheader(f"{agendamento.horario.strftime('%d/%m/%Y')} às {agendamento.horario.strftime('%H:%M')}")
-        st.caption(f"Cliente: {agendamento.cliente} | Status Atual: {agendamento.status}")
+    if agendamento and agendamento['status'] == "Confirmado":
+        st.info(f"Seu agendamento com {agendamento['profissional']} está CONFIRMADO para:")
+        st.subheader(f"{agendamento['horario'].strftime('%d/%m/%Y')} às {agendamento['horario'].strftime('%H:%M')}")
+        st.caption(f"Cliente: {agendamento['cliente']} | Status Atual: {agendamento['status']}")
         
         col1, col2 = st.columns(2)
         
         with col1:
             if st.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
-                # Chama a lógica de segurança
                 if processar_cancelamento_seguro(token):
-                    st.success("Agendamento cancelado com sucesso. O horário foi liberado para outro cliente.")
+                    st.success("Agendamento cancelado com sucesso. Você está livre!")
                     st.toast("Consulta cancelada!")
                     st.rerun() 
                 else:
@@ -64,7 +53,7 @@ def render_agendamento_seguro():
              st.button("🔄 REMARCAR (Em Breve)", use_container_width=True, disabled=True)
              
     elif agendamento:
-        st.warning(f"Este agendamento já está: {agendamento.status}. Não é possível alterar online.")
+        st.warning(f"Este agendamento já está: {agendamento['status']}. Não é possível alterar online.")
     else:
         st.error("Token de agendamento inválido ou expirado. Por favor, contate o profissional.")
 
@@ -97,39 +86,37 @@ def render_backoffice_admin():
                 profissional = st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof")
                 data_consulta = st.date_input("Data:", datetime.today(), key="c_data")
             with col3:
-                hora_consulta = st.time_input("Hora:", time(9, 0), step=1800, key="c_hora") 
+                hora_consulta = st.time_input("Hora:", time(9, 0), step=1800, key="c_hora")
                 submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary")
 
             if submitted and cliente:
                 dt_consulta = datetime.combine(data_consulta, hora_consulta)
                 
-                if horario_esta_disponivel(db_session, profissional, dt_consulta):
+                # A lógica de agendamento está mais limpa
+                if horario_esta_disponivel(profissional, dt_consulta):
                     token = gerar_token_unico()
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
-                    salvar_agendamento(db_session, dados, token)
                     
-                    # Gera o link de gestão para o profissional enviar
-                    # O link base é o link atual do Streamlit + o token
-                    link_base = f"https://agendafit.streamlit.app" # Substituir pelo seu link real do Streamlit Cloud
-                    link_gestao = f"{link_base}?token={token}"
-                    
-                    st.success(f"Consulta agendada para {cliente}.")
-                    st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE (Token):** `{link_gestao}`")
+                    if salvar_agendamento(dados, token):
+                        st.success(f"Consulta agendada para {cliente}.")
+                        
+                        # Gerando o link de gestão para o profissional enviar
+                        link_base = f"https://agendafit.streamlit.app" # Substituir pelo seu link real
+                        link_gestao = f"{link_base}?token={token}"
+                        
+                        st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{link_gestao}`")
+                    else:
+                        st.error("Erro ao salvar no banco de dados. Verifique a conexão do Supabase.")
                 else:
                     st.error("Horário já ocupado! Tente outro.")
         
         st.subheader("Agenda de Hoje")
-        agenda_hoje = buscar_agendamentos_hoje(db_session)
+        agenda_hoje = buscar_agendamentos_hoje()
         
-        if agenda_hoje:
-            df_agenda = pd.DataFrame([
-                {'Hora': item.horario.strftime('%H:%M'), 
-                 'Cliente': item.cliente, 
-                 'Profissional': item.profissional, 
-                 'Status': item.status} 
-                for item in agenda_hoje
-            ])
-            st.dataframe(df_agenda, use_container_width=True, hide_index=True)
+        if not agenda_hoje.empty:
+            df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status']].copy()
+            df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
+            st.dataframe(df_agenda[['Hora', 'cliente', 'profissional', 'status']], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
 
@@ -162,22 +149,15 @@ def render_backoffice_admin():
         else:
             st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
 
-    # --- TAB 3: Configuração e Pacotes (MVP Simples) ---
+    # --- TAB 3: Configuração e Pacotes ---
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
-        st.warning("Funcionalidades avançadas em desenvolvimento. Aqui o Python irá automatizar a gestão de créditos.")
-        st.markdown("""
-        **Otimizador de Pacotes:**
-        1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
-        2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
-        """)
+        st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
+
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
 
-# 1. Se o token existir na URL, renderiza a tela segura do cliente.
 if token_param:
     render_agendamento_seguro()
-
-# 2. Se o token NÃO existir, renderiza a tela de login/backoffice.
 else:
     render_backoffice_admin()
