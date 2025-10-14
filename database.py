@@ -1,22 +1,19 @@
-# database.py (CORREÇÃO DE NOME DA CONEXÃO)
+# database.py (CORRIGIDO PARA O NOME DA SEÇÃO SECRETS)
 
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-import uuid
-import pendulum
+# ... (imports omitidas)
+
 from streamlit.connections import SQLConnection
 
 # --- Inicialização da Conexão PostgreSQL (Supabase) ---
 @st.cache_resource
 def get_connection() -> SQLConnection:
-    """Obtém a conexão SQL, agora usando 'conexao_supabase'."""
+    """Obtém a conexão SQL, AGORA USANDO O NOME DA SEÇÃO SECRETS."""
     try:
-        # 1. ATUALIZAÇÃO CRÍTICA: Chama a conexão pelo novo nome genérico
+        # ATUALIZAÇÃO CRÍTICA: Chamamos a conexão pelo novo nome genérico 'conexao_supabase'
         conn = st.connection("conexao_supabase", type="sql") 
         return conn
     except Exception as e:
-        # Esta é a mensagem de erro que você estava vendo
+        # Esta é a mensagem de erro que você estava vendo, que agora deve ser resolvida com o nome correto
         st.error(f"Erro ao conectar ao banco de dados (st.connection). Verifique a string de conexão no secrets.toml. Detalhe: {e}")
         st.stop()
 
@@ -25,12 +22,12 @@ conn = get_connection()
 TABELA_AGENDAMENTOS = "agendamentos"
 
 
-# --- Funções de Operação no Banco de Dados ---
-# (O restante do código permanece o mesmo)
+# [O restante do código do database.py permanece o mesmo, pois as funções internas não mudaram.]
+
+# ... (Funções salvar_agendamento, buscar_agendamento_por_pin, etc.)
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo agendamento usando query SQL pura."""
-    
+    # [código omitido, permanece o mesmo]
     pin_code_str = str(pin_code)
     horario_iso = dados['horario'].isoformat()
     
@@ -48,9 +45,7 @@ def salvar_agendamento(dados: dict, pin_code: str):
 
 
 def buscar_agendamento_por_pin(pin_code: str):
-    """
-    Busca um agendamento específico usando o PIN com query SQL pura.
-    """
+    # [código omitido, permanece o mesmo]
     pin_code_str = str(pin_code)
     query = f"""
     SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = '{pin_code_str}' LIMIT 1;
@@ -70,9 +65,8 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
     return None
 
-
 def buscar_todos_agendamentos():
-    """Busca todos os agendamentos no DB e retorna um DataFrame."""
+    # [código omitido, permanece o mesmo]
     query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
     try:
         df = conn.query(query, ttl=0)
@@ -84,9 +78,8 @@ def buscar_todos_agendamentos():
         print(f"ERRO NA BUSCA TOTAL: {e}")
     return pd.DataFrame()
 
-
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-    """Atualiza o status de um agendamento específico."""
+    # [código omitido, permanece o mesmo]
     query = f"""
     UPDATE {TABELA_AGENDAMENTOS} SET status = '{novo_status}' 
     WHERE id = {id_agendamento};
@@ -99,7 +92,7 @@ def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
         return False
         
 def buscar_agendamento_por_id(id_agendamento: int):
-    """Busca um agendamento pelo ID (usado pelo Admin para ações rápidas)."""
+    # [código omitido, permanece o mesmo]
     query = f"""
     SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = {id_agendamento} LIMIT 1;
     """
