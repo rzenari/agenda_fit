@@ -1,43 +1,33 @@
-# database.py (VERSÃO FINAL PARA GOOGLE FIRESTORE)
+# database.py (VERSÃO FINAL COM st.connection("firestore"))
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import json # Necessário para decodificar a string JSON
-from google.cloud import firestore
+from datetime import datetime, time, date
+from streamlit.connections import BaseConnection # Importação do BaseConnection (st.connection)
+from google.cloud.firestore import Client # Para tipagem do cliente interno
 
-# --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
-@st.cache_resource
-def get_firestore_client():
-    """
-    Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
-    Isso contorna o problema de caracteres inválidos do parser TOML.
-    """
-    try:
-        # AQUI É A MUDANÇA: Leitura da string JSON completa
-        # A chave DEVE ser chamada 'json_key_string' no Streamlit Secrets
-        json_credenciais = st.secrets["firestore"]["json_key_string"]
-        
-        # O Python decodifica a string LIDA DO SECRETS para um objeto JSON (dicionário)
-        credenciais_dict = json.loads(json_credenciais)
-
-        # Usa o dicionário decodificado para autenticar
-        return firestore.Client.from_service_account_info(credenciais_dict)
-    except KeyError:
-        st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
-        st.stop()
-    except json.JSONDecodeError as e:
-        st.error(f"Erro de formato JSON. Falha ao decodificar a chave privada. Verifique as quebras de linha na Private Key. Detalhe: {e}")
-        st.stop()
-    except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}")
-        st.stop()
-
-db = get_firestore_client()
+# Definição do nome da Coleção
 COLECAO_AGENDAMENTOS = "agendamentos"
 
 
-# --- Funções de Operação no Banco de Dados (Refatoradas para NoSQL) ---
+# --- Inicialização da Conexão (Forma NATIVA Streamlit) ---
+@st.cache_resource
+def get_db_connection():
+    """Obtém a conexão Firestore via st.connection, que lê o JSON dos secrets."""
+    try:
+        # AQUI é onde o Streamlit lida com a autenticação JSON
+        # O nome 'firestore' deve corresponder à chave [connections.firestore] no secrets
+        conn = st.connection("firestore", type="firestore")
+        return conn.client # Retorna o objeto Cliente do Firestore autenticado
+    except Exception as e:
+        # Erro de conexão, geralmente causado por JSON mal formatado ou falta de permissão
+        st.error(f"Erro ao conectar ao Firestore. Verifique o JSON nos Secrets. Detalhe: {e}")
+        st.stop()
+
+db: Client = get_db_connection()
+
+
+# --- Funções de Operação no Banco de Dados (NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
     """Cria um novo documento (agendamento) no Firestore."""
@@ -53,6 +43,7 @@ def salvar_agendamento(dados: dict, pin_code: str):
     }
     
     try:
+        # db é o objeto Cliente do Firestore
         db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
         return True
     except Exception as e:
@@ -62,12 +53,14 @@ def salvar_agendamento(dados: dict, pin_code: str):
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN (Query NoSQL)."""
     try:
+        # Busca por um documento onde 'pin_code' é igual ao valor
         docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
         
         for doc in docs:
             data = doc.to_dict()
             data['id'] = doc.id 
             
+            # Converte a hora (TimeStamp) para datetime Python Naive
             if 'horario' in data:
                  data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             
@@ -86,6 +79,7 @@ def buscar_todos_agendamentos():
         for doc in docs:
             item = doc.to_dict()
             item['id'] = doc.id
+            # Converte a hora (TimeStamp) para datetime Python Naive
             if 'horario' in item:
                 item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
             data.append(item)
@@ -99,6 +93,7 @@ def buscar_todos_agendamentos():
 def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
     """Atualiza o status de um agendamento específico (usa ID de documento)."""
     try:
+        # Usa o ID (string) do documento para fazer o update
         doc_ref = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento)
         doc_ref.update({'status': novo_status})
         return True
