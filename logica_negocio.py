@@ -1,11 +1,11 @@
-# logica_negocio.py (FINAL)
+# logica_negocio.py (AJUSTADO PARA ST.CONNECTION)
 
 import uuid
 from datetime import datetime, date
 import pandas as pd
 import random 
 
-# Importações de funções de DB
+# Importações de funções de DB (agora do database.py que usa st.connection)
 from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_pin, buscar_agendamento_por_id
 
 def gerar_token_unico():
@@ -15,13 +15,12 @@ def gerar_token_unico():
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     """
     Verifica se o horário está livre, consultando o DB (DataFrame).
-    Garante que a comparação seja feita sem fuso horário (naive).
     """
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
     
-    # O dado de entrada (data_hora) não tem fuso, e o dado do DB foi limpo.
+    # O dado de entrada (data_hora) não tem fuso, e o dado do DB foi limpo na leitura.
     data_hora_naive = data_hora.replace(tzinfo=None)
         
     # Filtra por profissional, data/hora e status
@@ -66,6 +65,7 @@ def get_relatorio_no_show() -> pd.DataFrame:
     """
     Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional.
     """
+    # ... (A lógica de relatório permanece a mesma, usando buscar_todos_agendamentos)
     df = buscar_todos_agendamentos()
     
     if df.empty:
@@ -91,6 +91,7 @@ def get_relatorio_no_show() -> pd.DataFrame:
 
 def buscar_agendamentos_hoje():
     """Busca apenas os agendamentos confirmados para o dia de hoje."""
+    # ... (A lógica de busca permanece a mesma)
     df = buscar_todos_agendamentos()
     if df.empty:
         return pd.DataFrame()
