@@ -4,25 +4,27 @@ import pandas as pd
 import random
 
 # Importa as suas lógicas e DB
-# TODAS AS IMPORTAÇÕES ESTÃO AGORA CORRETAS
 from database import get_session, salvar_agendamento, buscar_agendamentos_hoje, Agendamento, buscar_agendamento_por_token
 from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show
 
 
-# --- Inicialização ---
-# Usamos st.cache_resource para garantir que a conexão com o DB e a criação da tabela
-# ocorram apenas uma vez, otimizando o desempenho no Streamlit Cloud.
+# --- Configuração Inicial ---
+
+# Inicialização do DB via cache_resource para otimização do Streamlit
 @st.cache_resource
 def setup_database():
     """Chama a função de inicialização do DB."""
     return get_session()
 
-# Chama o setup para garantir que o arquivo agenda.db seja criado/conectado
 db_session = setup_database()
 
-# --- Configuração ---
+# Configurações da Página e Variáveis Globais
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
+
+# --- ROTEAMENTO E PARÂMETROS ---
+# Correção: Definindo token_param no escopo global.
+token_param = st.query_params.get("token", [None])[0]
 
 
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
@@ -31,14 +33,15 @@ def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via token (Módulo I - Cliente)."""
     st.title("🔒 Gestão do seu Agendamento")
     
-    token_param = st.query_params.get("token", [None])[0]
+    # Busca o token no query_params
+    token = st.query_params.get("token", [None])[0]
     
-    if not token_param:
-        st.warning("Token de acesso não fornecido. Acesse pelo link exclusivo enviado.")
+    if not token:
+        st.error("Token de acesso não fornecido. Acesse pelo link exclusivo enviado.")
         return
 
     # Busca o agendamento no DB
-    agendamento = buscar_agendamento_por_token(db_session, token_param)
+    agendamento = buscar_agendamento_por_token(db_session, token)
     
     if agendamento and agendamento.status == "Confirmado":
         st.info(f"Seu agendamento com {agendamento.profissional} está CONFIRMADO para:")
@@ -50,10 +53,10 @@ def render_agendamento_seguro():
         with col1:
             if st.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
                 # Chama a lógica de segurança
-                if processar_cancelamento_seguro(token_param):
-                    st.success("Agendamento cancelado com sucesso. Você está livre!")
+                if processar_cancelamento_seguro(token):
+                    st.success("Agendamento cancelado com sucesso. O horário foi liberado para outro cliente.")
                     st.toast("Consulta cancelada!")
-                    st.rerun() # Recarrega para mostrar o status atualizado
+                    st.rerun() 
                 else:
                     st.error("Erro ao cancelar. Tente novamente ou contate o profissional.")
 
@@ -89,12 +92,12 @@ def render_backoffice_admin():
             col1, col2, col3 = st.columns(3)
             with col1:
                 cliente = st.text_input("Nome do Cliente:", key="c_nome")
-                telefone = st.text_input("Telefone (Para link gestão):", key="c_tel")
+                telefone = st.text_input("Telefone (para link gestão):", key="c_tel")
             with col2:
                 profissional = st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof")
                 data_consulta = st.date_input("Data:", datetime.today(), key="c_data")
             with col3:
-                hora_consulta = st.time_input("Hora:", time(9, 0), step=1800, key="c_hora") # Intervalo de 30min
+                hora_consulta = st.time_input("Hora:", time(9, 0), step=1800, key="c_hora") 
                 submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary")
 
             if submitted and cliente:
@@ -105,8 +108,10 @@ def render_backoffice_admin():
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     salvar_agendamento(db_session, dados, token)
                     
-                    # Gerando o link de gestão para o profissional enviar
-                    link_gestao = f"{st.experimental_get_query_params().get('url', ['https://agendafit.streamlit.app'])[0]}?token={token}"
+                    # Gera o link de gestão para o profissional enviar
+                    # O link base é o link atual do Streamlit + o token
+                    link_base = f"https://agendafit.streamlit.app" # Substituir pelo seu link real do Streamlit Cloud
+                    link_gestao = f"{link_base}?token={token}"
                     
                     st.success(f"Consulta agendada para {cliente}.")
                     st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE (Token):** `{link_gestao}`")
@@ -134,8 +139,7 @@ def render_backoffice_admin():
         
         df_relatorio = get_relatorio_no_show()
         
-        if not df_relatorio.empty and not df_relatorio['total_atendimentos'].empty:
-            
+        if not df_relatorio.empty:
             st.subheader("Taxa de No-Show Média vs. Profissional")
             
             total_atendimentos = df_relatorio['total_atendimentos'].sum()
@@ -154,7 +158,6 @@ def render_backoffice_admin():
                 'Taxa No-Show (%)': 'Taxa Falta (%)'
             }), use_container_width=True, hide_index=True)
 
-            # Otimização: Gráfico para visualizar a dor
             st.bar_chart(df_relatorio.set_index('profissional')['Taxa No-Show (%)'])
         else:
             st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
@@ -164,8 +167,7 @@ def render_backoffice_admin():
         st.header("⚙️ Gestão de Pacotes e Otimização")
         st.warning("Funcionalidades avançadas em desenvolvimento. Aqui o Python irá automatizar a gestão de créditos.")
         st.markdown("""
-        O recurso de **Otimizador de Pacotes** é o principal diferencial deste plano. 
-        Ele irá:
+        **Otimizador de Pacotes:**
         1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
         2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
         """)
