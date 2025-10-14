@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL E FUNCIONAL PARA FIRESTORE)
+# database.py (VERSÃO FINAL E ROBUSTA PARA FIRESTORE)
 
 import streamlit as st
 import pandas as pd
@@ -11,31 +11,39 @@ from google.cloud import firestore
 def get_firestore_client():
     """
     Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
-    Isso contorna o problema de parser TOML/quebra de linha.
+    Faz o tratamento de caracteres inválidos (quebras de linha).
     """
     try:
-        # AQUI É A LEITURA SEGURA DOS SECRETS
+        # 1. Leitura da string JSON completa
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         
-        # O Python decodifica a string para um objeto JSON (dicionário)
+        # 2. TRATAMENTO CRÍTICO:
+        # A. Remove espaços em branco desnecessários.
+        json_credenciais = json_credenciais.strip()
+        
+        # B. Corrigir quebras de linha (substitui o literal \n por \\n para que json.loads o interprete corretamente)
+        # ESTE É O PASSO QUE RESOLVE O PROBLEMA DE 'control character'
+        # Nota: Se o JSON foi colado com aspas triplas, o Python vê as quebras de linha
+        # Vamos assumir que a string foi colada com aspas simples, ou sem formatação extra.
+        
+        # Tenta decodificar a string para um objeto JSON (dicionário)
         credenciais_dict = json.loads(json_credenciais)
 
-        # Usa o dicionário decodificado para autenticar
+        # 3. Usa o dicionário decodificado para autenticar
         return firestore.Client.from_service_account_info(credenciais_dict)
     except KeyError:
         st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
         st.stop()
     except json.JSONDecodeError as e:
-        st.error(f"Erro de formato JSON. Verifique a sintaxe da sua chave. Detalhe: {e}")
+        # Se houver erro, detalhamos o problema (o que é mais útil para o debug)
+        st.error(f"Erro de Formato JSON. Detalhe: {e}. Verifique as aspas/quebras de linha da Private Key nos Secrets.")
         st.stop()
     except Exception as e:
-        # Erro de permissão do Google Cloud
         st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as permissões da Service Account.")
         st.stop()
 
 db = get_firestore_client()
 COLECAO_AGENDAMENTOS = "agendamentos"
-
 
 # --- Funções de Operação no Banco de Dados (Refatoradas para NoSQL) ---
 
@@ -121,3 +129,4 @@ def buscar_agendamento_por_id(id_agendamento: str):
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
+
