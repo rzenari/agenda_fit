@@ -1,10 +1,10 @@
-# logica_negocio.py (COMPLETO E FINAL)
+# logica_negocio.py (FINAL)
 
 import uuid
 from datetime import datetime, date
 import pandas as pd
 
-# IMPORTAÇÃO CORRIGIDA (EM UMA ÚNICA LINHA):
+# Importações de funções de DB
 from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
 
 def gerar_token_unico():
@@ -14,13 +14,13 @@ def gerar_token_unico():
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     """
     Verifica se o horário está livre, consultando o DB (DataFrame).
-    Garante que a comparação seja feita sem fuso horário.
+    Garante que a comparação seja feita sem fuso horário (naive).
     """
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
     
-    # Prepara a data de entrada do usuário
+    # O dado de entrada (data_hora) não tem fuso, e o dado do DB foi limpo.
     data_hora_naive = data_hora.replace(tzinfo=None)
         
     # Filtra por profissional, data/hora e status
