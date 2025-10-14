@@ -1,25 +1,22 @@
-# database.py (VERSÃO FINAL E MAIS ESTÁVEL)
+# database.py (CORREÇÃO DE NOME DA CONEXÃO)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 import uuid
 import pendulum
-# IMPORTANTE: A importação do SQLAlchemy não é mais necessária aqui, mas é no requirements.txt
-
 from streamlit.connections import SQLConnection
 
 # --- Inicialização da Conexão PostgreSQL (Supabase) ---
-# Usamos st.connection com o nome 'postgresql' que deve estar configurado no secrets.toml
 @st.cache_resource
 def get_connection() -> SQLConnection:
-    """Obtém a conexão SQL com o banco de dados Supabase (PostgreSQL)."""
+    """Obtém a conexão SQL, agora usando 'conexao_supabase'."""
     try:
-        # st.connection busca as credenciais do secrets.toml e constrói a conexão
-        conn = st.connection("postgresql", type="sql")
+        # 1. ATUALIZAÇÃO CRÍTICA: Chama a conexão pelo novo nome genérico
+        conn = st.connection("conexao_supabase", type="sql") 
         return conn
     except Exception as e:
-        # Esta é a mensagem de erro que você estava vendo, que agora será resolvida com a instalação do SQLAlchemy
+        # Esta é a mensagem de erro que você estava vendo
         st.error(f"Erro ao conectar ao banco de dados (st.connection). Verifique a string de conexão no secrets.toml. Detalhe: {e}")
         st.stop()
 
@@ -29,7 +26,7 @@ TABELA_AGENDAMENTOS = "agendamentos"
 
 
 # --- Funções de Operação no Banco de Dados ---
-# [O restante do database.py permanece o mesmo, pois as funções são chamadas por conn.query]
+# (O restante do código permanece o mesmo)
 
 def salvar_agendamento(dados: dict, pin_code: str):
     """Cria um novo agendamento usando query SQL pura."""
