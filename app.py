@@ -1,5 +1,3 @@
-# app.py (AJUSTADO PARA EXIBIR O ERRO DETALHADO)
-
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
@@ -20,7 +18,7 @@ from logica_negocio import (
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
 
-# Inicialização do DB
+# Inicialização do DB (Chama o client Firestore)
 db_client = get_firestore_client()
 if db_client is None:
     st.stop() 
@@ -89,27 +87,36 @@ def render_agendamento_seguro():
 def render_backoffice_admin():
     """Renderiza a tela de gestão do profissional (Módulo II - Admin)."""
     
-    # --- Login (omissões por brevidade) ---
+    # --- Login ---
     st.sidebar.header("Login (Admin)")
     senha = st.sidebar.text_input("Senha", type="password")
+    
     if senha != "1234":
         st.warning("Acesso restrito ao profissional. Senha de teste: 1234")
         st.session_state.last_agendamento_info = None 
-        return
+        return # Garante que o restante do código não seja executado
 
     st.sidebar.success("Login como Administrador")
 
-    # --- Navegação (omissões por brevidade) ---
+    # --- Navegação do Admin ---
     tab1, tab2, tab3 = st.tabs(["Agenda Hoje/Manual", "Relatórios e Faltas", "Configuração (Pacotes)"])
 
     # --- TAB 1: Agendamento Manual e Agenda do Dia ---
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
+        # EXIBE A MENSAGEM PERSISTIDA
         if st.session_state.last_agendamento_info:
             info = st.session_state.last_agendamento_info
-            st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
-            st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
+            
+            # Garante que o erro do backend seja exibido (se for uma string)
+            if info['status'] is True:
+                st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
+                st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
+            else:
+                # Exibe o erro detalhado que veio do database.py
+                st.error(f"Erro ao salvar no banco de dados. Motivo: {info['status']}")
+
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
@@ -132,7 +139,7 @@ def render_backoffice_admin():
                     pin_code = gerar_token_unico() 
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     
-                    # CHAMA A FUNÇÃO DE SALVAMENTO E CAPTURA O RETORNO
+                    # CHAMA A FUNÇÃO E CAPTURA O RETORNO DETALHADO (True ou string de erro)
                     resultado = salvar_agendamento(dados, pin_code)
                     
                     if resultado is True:
@@ -140,16 +147,22 @@ def render_backoffice_admin():
                         link_base = f"https://agendafit.streamlit.app" 
                         link_gestao = f"{link_base}?pin={pin_code}" 
                         
+                        # ARMAZENA O SUCESSO
                         st.session_state.last_agendamento_info = {
                             'cliente': cliente,
                             'pin_code': pin_code,
-                            'link_gestao': link_gestao
+                            'link_gestao': link_gestao,
+                            'status': True # Flag de sucesso
                         }
                         
                         st.rerun() 
                     else:
-                        # MUDANÇA CRÍTICA: EXIBE A MENSAGEM DE ERRO DETALHADA
-                        st.error(f"Erro ao salvar no banco de dados. Motivo: {resultado}")
+                        # ARMAZENA O ERRO
+                        st.session_state.last_agendamento_info = {
+                            'cliente': cliente,
+                            'status': resultado # Armazena a string de erro
+                        }
+                        st.rerun() 
                 else:
                     st.error("Horário já ocupado! Tente outro.")
         
@@ -200,7 +213,7 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2 e TAB 3 (omissões por brevidade) ---
+    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
         
