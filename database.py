@@ -51,7 +51,7 @@ def salvar_agendamento(dados: dict, token: str):
 def buscar_agendamento_por_token(token: str):
     """
     Busca um agendamento específico usando o token de segurança.
-    CORREÇÃO: Usa Pandas para converter a data do Supabase de forma robusta.
+    CORREÇÃO: Converte a data do Supabase para datetime nativo do Python.
     """
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).execute()
@@ -59,14 +59,13 @@ def buscar_agendamento_por_token(token: str):
         if response.data:
             data = response.data[0]
             
-            # Converte o registro (que é um dicionário) para DataFrame
-            df_temp = pd.DataFrame([data])
+            # 1. Converte a string de data/hora para Pandas Timestamp
+            timestamp = pd.to_datetime(data['horario'])
             
-            # Converte a coluna 'horario' usando Pandas
-            df_temp['horario'] = pd.to_datetime(df_temp['horario'])
+            # 2. Converte o Pandas Timestamp para datetime nativo do Python (resolvendo a compatibilidade)
+            data['horario'] = timestamp.to_pydatetime()
             
-            # Retorna o registro convertido como dicionário
-            return df_temp.iloc[0].to_dict()
+            return data
     return None
 
 def buscar_todos_agendamentos():
@@ -75,7 +74,7 @@ def buscar_todos_agendamentos():
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").order("horario").execute()
         if response.data:
             df = pd.DataFrame(response.data)
-            # Converte a coluna 'horario' de forma robusta
+            # Conversão robusta de data com pd.to_datetime
             df['horario'] = pd.to_datetime(df['horario'])
             return df
     return pd.DataFrame()
@@ -83,7 +82,6 @@ def buscar_todos_agendamentos():
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
     """Atualiza o status de um agendamento específico."""
     if supabase:
-        # Busca pelo ID da linha no Supabase
         response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
         return response.data
     return None
