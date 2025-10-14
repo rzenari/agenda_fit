@@ -1,29 +1,25 @@
-# logica_negocio.py (FINAL)
+# logica_negocio.py (Com Gerador de PIN)
 
 import uuid
 from datetime import datetime, date
 import pandas as pd
+import random # Novo import para gerar o PIN
 
 # Importações de funções de DB
-from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
+from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_pin as buscar_agendamento_por_token, buscar_agendamento_por_id
 
 def gerar_token_unico():
-    """Gera um UUID seguro para links de gestão do cliente."""
-    return str(uuid.uuid4())
+    """NOVA FUNÇÃO: Gera um código PIN numérico de 6 dígitos."""
+    return str(random.randint(100000, 999999))
 
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
-    """
-    Verifica se o horário está livre, consultando o DB (DataFrame).
-    Garante que a comparação seja feita sem fuso horário (naive).
-    """
+    # [Função de bloqueio de horário omitida, permanece a mesma]
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
     
-    # O dado de entrada (data_hora) não tem fuso, e o dado do DB foi limpo.
     data_hora_naive = data_hora.replace(tzinfo=None)
         
-    # Filtra por profissional, data/hora e status
     conflito = df[
         (df['profissional'] == profissional) &
         (df['horario'] == data_hora_naive) & 
@@ -32,24 +28,39 @@ def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     
     return conflito.empty
 
-def processar_cancelamento_seguro(token: str) -> bool:
-    """Cancela o agendamento apenas se o token for válido e o status for 'Confirmado'."""
+def processar_cancelamento_seguro(pin_code: str) -> bool:
+    """Cancela o agendamento apenas se o PIN for válido e o status for 'Confirmado'."""
     
-    agendamento = buscar_agendamento_por_token(token)
+    agendamento = buscar_agendamento_por_pin(pin_code)
     
     if agendamento and agendamento['status'] == "Confirmado":
-        # Chama a função de atualização do DB
+        # Chama a função de atualização do DB usando o ID real do agendamento
         atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
         return True
         
     return False
 
-def get_relatorio_no_show() -> pd.DataFrame:
-    """
-    Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional.
-    """
-    df = buscar_todos_agendamentos()
+# NOVAS FUNÇÕES PARA O ADMIN
+def acao_admin_agendamento(agendamento_id: int, acao: str) -> bool:
+    """Executa ações rápidas (Finalizar/Cancelar/No-Show) pelo painel Admin."""
     
+    status_map = {
+        "cancelar": "Cancelado (Admin)",
+        "finalizar": "Finalizado",
+        "no-show": "No-Show",
+    }
+    novo_status = status_map.get(acao)
+    
+    if novo_status:
+        # Chama a função de atualização do DB usando o ID
+        atualizar_status_agendamento(agendamento_id, novo_status)
+        return True
+    return False
+
+
+def get_relatorio_no_show():
+    # [Função de relatório omitida, permanece a mesma]
+    df = buscar_todos_agendamentos()
     if df.empty:
         return pd.DataFrame()
     
@@ -72,7 +83,7 @@ def get_relatorio_no_show() -> pd.DataFrame:
     return df_grouped.sort_values(by='Taxa No-Show (%)', ascending=False).reset_index()
 
 def buscar_agendamentos_hoje():
-    """Busca apenas os agendamentos confirmados para o dia de hoje."""
+    # [Função de busca de hoje omitida, permanece a mesma]
     df = buscar_todos_agendamentos()
     if df.empty:
         return pd.DataFrame()
