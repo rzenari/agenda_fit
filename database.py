@@ -1,23 +1,29 @@
-# database.py (VERSÃO FINAL COM PARÂMETROS SEGUROS)
+# database.py (VERSÃO FINAL COM PGBOUNCER)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit.connections import SQLConnection
-from psycopg2.errors import UniqueViolation # Adicionando import para tratamento de erro específico
 
-# [Inicialização da Conexão PostgreSQL e Variáveis Omitidas, permanecem as mesmas]
+# --- Inicialização da Conexão PostgreSQL (Supabase) ---
 @st.cache_resource
 def get_connection() -> SQLConnection:
-    # [Código de inicialização omitido]
+    """Obtém a conexão SQL, AGORA USANDO O PGBOUNCER (PORTA 6543)."""
     try:
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
+        # Lendo os secrets
+        supabase_url = st.secrets["supabase"]["url"]
+        db_password = st.secrets["supabase"]["password"] 
         
-        db_password = st.secrets["supabase"]["password"]
-        host_db = url.replace("https://", "").split("/")[0]
-        db_uri = f"postgresql://postgres:{db_password}@{host_db}:5432/postgres"
+        # Lendo a porta correta para o PGBOUNCER (6543)
+        db_port = st.secrets["supabase"].get("port_db", 5432) # Fallback para 5432 se a chave não existir
+        
+        # Processando a URL para obter o host
+        host_db = supabase_url.replace("https://", "").split("/")[0]
 
+        # Montando a URI de conexão com a nova porta
+        db_uri = f"postgresql://postgres:{db_password}@{host_db}:{db_port}/postgres"
+
+        # Conecta usando a URI construída
         conn = st.connection("sql_postgres", type="sql", url=db_uri) 
         return conn
     except Exception as e:
@@ -25,13 +31,18 @@ def get_connection() -> SQLConnection:
         st.stop()
 
 conn = get_connection()
-TABELA_AGENDAMENTOS = "public.agendamentos" # Nome da tabela com schema
+TABELA_AGENDAMENTOS = "public.agendamentos"
 
 
 # --- Funções de Operação no Banco de Dados ---
+# [Todas as funções de busca e salvamento permanecem as mesmas, usando conn.query]
+# ...
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo agendamento usando parâmetros seguros."""
+    """Cria um novo agendamento usando query SQL pura."""
+    
+    pin_code_str = str(pin_code)
+    horario_iso = dados['horario'].isoformat()
     
     query = f"""
     INSERT INTO {TABELA_AGENDAMENTOS} (token_unico, profissional, cliente, telefone, horario, status, is_pacote_sessao)
@@ -39,17 +50,16 @@ def salvar_agendamento(dados: dict, pin_code: str):
     """
     
     params = {
-        'token_unico': str(pin_code),
+        'token_unico': pin_code_str,
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': dados['horario'], # Envia o datetime; o adaptador cuida do formato SQL
+        'horario': dados['horario'],
         'status': 'Confirmado',
         'is_pacote_sessao': False 
     }
     
     try:
-        # Executa a query com os parâmetros separados (write=True)
         conn.query(query, params=params, ttl=0, write=True)
         return True
     except Exception as e:
@@ -60,21 +70,18 @@ def salvar_agendamento(dados: dict, pin_code: str):
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento específico usando parâmetros seguros."""
     
+    pin_code_str = str(pin_code)
     query = f"""
     SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = %(pin)s LIMIT 1;
     """
     
     try:
-        # Executa a query com o parâmetro PIN
-        df = conn.query(query, params={'pin': str(pin_code)}, ttl=0)
+        df = conn.query(query, params={'pin': pin_code_str}, ttl=0)
         
         if not df.empty:
             data = df.iloc[0].to_dict()
-            
-            # Limpa o timezone para compatibilidade com o app.py
             if data['horario']:
                 data['horario'] = data['horario'].replace(tzinfo=None)
-            
             return data
     except Exception as e:
         print(f"ERRO NA BUSCA POR PIN: {e}")
@@ -83,7 +90,6 @@ def buscar_agendamento_por_pin(pin_code: str):
 
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos no DB e retorna um DataFrame."""
-    # Query de SELECT não precisa de parâmetros, mas mantemos o tratamento de data
     query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
     try:
         df = conn.query(query, ttl=0)
