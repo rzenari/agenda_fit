@@ -1,35 +1,35 @@
-# database.py (VERSÃO FINAL DE COMPATIBILIDADE)
+# database.py (VERSÃO FINAL COM REMOÇÃO DE POSTGREST)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from streamlit.connections import SQLConnection
-from postgrest import APIError # Importa APIError para tratamento de exceções
+# LINHA ABAIXO REMOVIDA: from postgrest import APIError 
+# O código deve usar o bloco try...except genérico do Python
+
 
 # --- Inicialização da Conexão PostgreSQL (Supabase) ---
 @st.cache_resource
 def get_connection() -> SQLConnection:
     """Obtém a conexão SQL, construindo a URI a partir dos secrets do Supabase."""
     try:
-        # 1. Lendo os secrets no formato que você tem
-        supabase_url = st.secrets["supabase"]["url"]
-        db_password = st.secrets["supabase"]["password"] # <-- LÊ O NOVO CAMPO PASSWORD
+        # 1. Lendo os secrets (restante do código omitido)
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
         
-        # 2. Processando a URL para obter o host (ex: db.projeto.supabase.co)
-        # O host é a URL sem o prefixo HTTPS
-        host_db = supabase_url.replace("https://", "").split("/")[0]
-
-        # 3. Montando a URI de conexão PostgreSQL nativa
-        # Assume user/database 'postgres' e porta 5432 (padrão Supabase)
+        # 2. Montando a URI (restante do código omitido)
+        db_password = st.secrets["supabase"]["password"]
+        host_db = url.replace("https://", "").split("/")[0]
         db_uri = f"postgresql://postgres:{db_password}@{host_db}:5432/postgres"
 
-        # 4. Conecta usando a URI construída
+        # 3. Conecta usando a URI construída
         conn = st.connection("sql_postgres", type="sql", url=db_uri) 
         return conn
     except KeyError:
         st.error("Erro Crítico: Verifique se 'url' e 'password' estão na seção [supabase] nos seus Secrets.")
         st.stop()
     except Exception as e:
+        # O tratamento de erro genérico continua
         st.error(f"Erro ao conectar ao DB. Detalhe: {e}")
         st.stop()
 
@@ -54,7 +54,7 @@ def salvar_agendamento(dados: dict, pin_code: str):
     try:
         conn.query(query, ttl=0, write=True)
         return True
-    except Exception as e:
+    except Exception as e: # Exceção genérica é suficiente
         print(f"ERRO AO SALVAR: {e}")
         return False
 
@@ -74,7 +74,6 @@ def buscar_agendamento_por_pin(pin_code: str):
         if not df.empty:
             data = df.iloc[0].to_dict()
             
-            # Limpa o timezone para compatibilidade com o app.py
             if data['horario']:
                 data['horario'] = data['horario'].replace(tzinfo=None)
             
@@ -83,13 +82,13 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
     return None
 
-
+# [O restante do database.py com as outras funções permanece o mesmo]
+# ...
 def buscar_todos_agendamentos():
-    """Busca todos os agendamentos no DB e retorna um DataFrame."""
+    # [código omitido]
     query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
     try:
         df = conn.query(query, ttl=0)
-        
         if 'horario' in df.columns:
             df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
             return df
@@ -99,7 +98,7 @@ def buscar_todos_agendamentos():
 
 
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-    """Atualiza o status de um agendamento específico."""
+    # [código omitido]
     query = f"""
     UPDATE {TABELA_AGENDAMENTOS} SET status = '{novo_status}' 
     WHERE id = {id_agendamento};
@@ -112,7 +111,7 @@ def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
         return False
         
 def buscar_agendamento_por_id(id_agendamento: int):
-    """Busca um agendamento pelo ID (usado pelo Admin para ações rápidas)."""
+    # [código omitido]
     query = f"""
     SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = {id_agendamento} LIMIT 1;
     """
