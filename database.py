@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL com PIN Code)
+# database.py (VERSÃO FINAL E MAIS ESTÁVEL PARA O PIN)
 
 import streamlit as st
 from supabase import create_client, Client
@@ -6,18 +6,13 @@ from datetime import datetime
 import pandas as pd
 import uuid
 
-# --- Inicialização da Conexão ---
+# --- Inicialização da Conexão (Omitida, permanece a mesma) ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # [Inicialização do Supabase omitida, permanece a mesma]
     try:
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
-        
         return create_client(url, key)
-    except KeyError:
-        st.error("Erro de Configuração: As chaves 'url' ou 'key' do Supabase não foram encontradas no st.secrets.")
-        st.stop() 
     except Exception as e:
         st.error(f"Erro de Conexão com Supabase. Verifique a URL/KEY. Erro: {e}")
         st.stop()
@@ -31,10 +26,13 @@ TABELA_AGENDAMENTOS = "agendamentos"
 def salvar_agendamento(dados: dict, pin_code: str):
     """Cria um novo agendamento no DB Supabase usando o PIN."""
     
+    # Garante que o PIN seja salvo como string
+    pin_code_str = str(pin_code) 
+    
     horario_iso = dados['horario'].isoformat()
     
     data_para_salvar = {
-        'token_unico': pin_code, # Usaremos a coluna token_unico para armazenar o PIN
+        'token_unico': pin_code_str, 
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
@@ -52,15 +50,19 @@ def salvar_agendamento(dados: dict, pin_code: str):
 def buscar_agendamento_por_pin(pin_code: str):
     """
     Busca um agendamento específico usando o PIN.
-    O PIN é mais simples e menos propenso a erros de tipagem.
+    CORREÇÃO: Garantia de que o pin_code buscado é uma string, e tratamento de data/hora na saída.
     """
     if supabase:
-        response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", pin_code).limit(1).execute()
+        # A busca por tokens (agora PIN) deve ser como string
+        response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", str(pin_code)).limit(1).execute()
         
         if response.data:
             data = response.data[0]
-            # Conversão robusta de data
+            
+            # --- Conversão de data/hora (que é a origem da instabilidade) ---
             timestamp = pd.to_datetime(data['horario'])
+            
+            # Converte para datetime nativo do Python e REMOVE O TIMEZONE
             data['horario'] = timestamp.to_pydatetime().replace(tzinfo=None)
             
             return data
@@ -78,14 +80,14 @@ def buscar_todos_agendamentos():
     return pd.DataFrame()
 
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-    """Atualiza o status de um agendamento específico (Usado pelo Admin)."""
+    # [Função atualizar_status_agendamento omitida, permanece a mesma]
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
         return response.data
     return None
 
 def buscar_agendamento_por_id(id_agendamento: int):
-    """Busca um agendamento pelo ID (Usado pelo Admin para ações rápidas)."""
+    # [Função buscar_agendamento_por_id omitida, permanece a mesma]
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("id", id_agendamento).limit(1).execute()
         if response.data:
