@@ -20,7 +20,6 @@ def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     if df.empty:
         return True
     
-    # O dado de entrada (data_hora) não tem fuso, e o dado do DB foi limpo.
     data_hora_naive = data_hora.replace(tzinfo=None)
         
     # Filtra por profissional, data/hora e status
@@ -38,7 +37,7 @@ def processar_cancelamento_seguro(pin_code: str) -> bool:
     agendamento = buscar_agendamento_por_pin(pin_code)
     
     if agendamento and agendamento['status'] == "Confirmado":
-        # CHAVE: Agora usa o ID do documento do Firestore, que é uma string
+        # Chama a função de atualização do DB (usa o ID do Firestore, que é uma string)
         atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
         return True
         
@@ -62,7 +61,9 @@ def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
 
 
 def get_relatorio_no_show() -> pd.DataFrame:
-    # [Função de relatório omitida, permanece a mesma]
+    """
+    Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional.
+    """
     df = buscar_todos_agendamentos()
     
     if df.empty:
@@ -87,7 +88,7 @@ def get_relatorio_no_show() -> pd.DataFrame:
     return df_grouped.sort_values(by='Taxa No-Show (%)', ascending=False).reset_index()
 
 def buscar_agendamentos_hoje():
-    # [Função de busca de hoje omitida, permanece a mesma]
+    """Busca apenas os agendamentos confirmados para o dia de hoje."""
     df = buscar_todos_agendamentos()
     if df.empty:
         return pd.DataFrame()
