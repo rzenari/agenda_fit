@@ -4,7 +4,7 @@ import pandas as pd
 import random
 
 # IMPORTAÇÕES SEGURAS E CORRETAS:
-from database import init_supabase, salvar_agendamento, buscar_agendamento_por_pin, buscar_todos_agendamentos, buscar_agendamento_por_id
+from database import init_supabase, salvar_agendamento, buscar_agendamento_por_pin, buscar_todos_agendamentos, buscar_agendamento_por_id, atualizar_status_agendamento
 from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show, acao_admin_agendamento, buscar_agendamentos_hoje
 
 
@@ -31,6 +31,16 @@ pin_param = st.query_params.get("pin", [None])[0]
 # Inicialização do Session State para persistir a mensagem
 if 'last_agendamento_info' not in st.session_state:
     st.session_state.last_agendamento_info = None
+
+
+# --- FUNÇÃO DE AÇÃO GLOBAL (CORRIGIDA) ---
+# Esta função foi movida para o escopo global para ser usada pelos botões on_click.
+def handle_admin_action(id_agendamento, acao):
+    if acao_admin_agendamento(id_agendamento, acao):
+        st.success(f"Ação '{acao.upper()}' registrada para o agendamento ID {id_agendamento}!")
+        st.rerun()
+    else:
+        st.error("Falha ao registrar a ação no sistema.")
 
 
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
@@ -123,7 +133,7 @@ def render_backoffice_admin():
                     if salvar_agendamento(dados, pin_code):
                         
                         link_base = f"https://agendafit.streamlit.app" 
-                        link_gestao = f"{link_base}?pin={pin_code}"
+                        link_gestao = f"{link_base}?pin={pin_code}" 
                         
                         st.session_state.last_agendamento_info = {
                             'cliente': cliente,
@@ -131,7 +141,7 @@ def render_backoffice_admin():
                             'link_gestao': link_gestao
                         }
                         
-                        st.rerun()
+                        st.rerun() 
                     else:
                         st.error("Erro ao salvar no banco de dados. Verifique a conexão do Supabase.")
                 else:
@@ -151,7 +161,7 @@ def render_backoffice_admin():
                     "id": st.column_config.Column(width="small", label="ID"),
                     "Ações": st.column_config.Column("Ações", width="large")
                 },
-                on_select="ignore", # CORREÇÃO APLICADA AQUI: Mudança para 'ignore'
+                on_select="ignore", 
                 use_container_width=True, 
                 hide_index=True,
             )
@@ -181,7 +191,7 @@ def render_backoffice_admin():
                                     on_click=handle_admin_action, 
                                     args=(row['id'], "cancelar"))
 
-                st.markdown("---", unsafe_allow_html=True) # Separador visual
+                st.markdown("---", unsafe_allow_html=True) 
 
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
