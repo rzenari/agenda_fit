@@ -1,0 +1,16 @@
+# Arquivos de Cache e Build
+__pycache__/
+*.pyc
+
+# Ambientes Virtuais (CRÍTICO)
+venv/
+.venv/
+env/
+
+# Arquivos de Configuração Local do Streamlit (CRÍTICO!)
+.streamlit/secrets.toml  # <-- ESSA LINHA ESCONDE SUAS CHAVES
+.streamlit/config.toml
+
+# Bancos de Dados Locais
+*.db
+agenda.db
