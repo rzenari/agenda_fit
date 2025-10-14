@@ -1,138 +1,108 @@
-# database.py (VERSÃO FINAL COM ISO EXPLÍCITO)
+# database.py (VERSÃO FINAL COM GOOGLE FIRESTORE)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-from streamlit.connections import SQLConnection
-# A biblioteca Pandas é importada implicitamente pelo st.connection
+from datetime import datetime, time, date
+from google.cloud import firestore
 
-# --- Inicialização da Conexão PostgreSQL (Supabase) ---
+# --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
 @st.cache_resource
-def get_connection() -> SQLConnection:
-    """Obtém a conexão SQL, construindo a URI a partir dos secrets do Supabase."""
+def get_firestore_client():
+    """Inicializa o cliente Firestore usando st.secrets (Service Account JSON)."""
     try:
-        # Lendo os secrets (conforme o formato que você configurou)
-        supabase_url = st.secrets["supabase"]["url"]
-        db_password = st.secrets["supabase"]["password"] 
-        db_port = st.secrets["supabase"].get("port_db", 5432)
-        host_db = supabase_url.replace("https://", "").split("/")[0]
-        
-        # Montando a URI de conexão PostgreSQL nativa
-        db_uri = f"postgresql://postgres:{db_password}@{host_db}:{db_port}/postgres"
-
-        conn = st.connection("sql_postgres", type="sql", url=db_uri) 
-        return conn
+        # Lê o JSON formatado em TOML que você colou nos Secrets
+        # O Streamlit usa os dados para autenticar a Service Account
+        return firestore.Client.from_service_account_info(st.secrets["firestore"])
     except Exception as e:
-        st.error(f"Erro ao conectar ao DB. Detalhe: {e}")
+        st.error(f"Erro ao conectar ao Google Firestore. Verifique a chave JSON/TOML no secrets. Detalhe: {e}")
         st.stop()
 
-# Variável de conexão
-conn = get_connection()
-TABELA_AGENDAMENTOS = "public.agendamentos"
+db = get_firestore_client()
+COLECAO_AGENDAMENTOS = "agendamentos"
 
 
-# --- Funções de Operação no Banco de Dados ---
+# --- Funções de Operação no Banco de Dados (NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo agendamento usando query SQL pura."""
+    """Cria um novo documento (agendamento) no Firestore."""
     
-    pin_code_str = str(pin_code)
-    # CORREÇÃO CRÍTICA: FORÇAR O DATETIME PARA STRING ISO NO FORMATO SIMPLES DO SQL
-    horario_sql = dados['horario'].strftime('%Y-%m-%d %H:%M:%S') 
-    
-    query = f"""
-    INSERT INTO {TABELA_AGENDAMENTOS} (token_unico, profissional, cliente, telefone, horario, status, is_pacote_sessao)
-    VALUES (%(token_unico)s, %(profissional)s, %(cliente)s, %(telefone)s, %(horario)s, %(status)s, %(is_pacote_sessao)s);
-    """
-    
-    params = {
-        'token_unico': pin_code_str,
+    data_para_salvar = {
+        'pin_code': str(pin_code),
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': horario_sql, # <--- ENVIADO COMO STRING SIMPLES
-        'status': 'Confirmado',
+        'horario': dados['horario'],  # Firestore armazena nativamente o datetime
+        'status': "Confirmado",
         'is_pacote_sessao': False 
     }
     
     try:
-        conn.query(query, params=params, ttl=0, write=True)
+        # O Firestore gera o ID
+        db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
         return True
     except Exception as e:
-        print(f"ERRO AO SALVAR: {e}")
+        print(f"ERRO AO SALVAR NO FIRESTORE: {e}")
         return False
 
-
 def buscar_agendamento_por_pin(pin_code: str):
-    """
-    Busca um agendamento específico usando o PIN com query SQL pura.
-    """
-    pin_code_str = str(pin_code)
-    query = f"""
-    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE token_unico = %(pin)s LIMIT 1;
-    """
-    
+    """Busca um agendamento pelo PIN (Query NoSQL)."""
     try:
-        df = conn.query(query, params={'pin': pin_code_str}, ttl=0)
+        # Query: SELECT * FROM agendamentos WHERE pin_code = pin_code
+        docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
         
-        if not df.empty:
-            data = df.iloc[0].to_dict()
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id # ID do Firestore (string)
             
-            # Garante que o horário lido não tem timezone para compatibilidade
-            if data['horario']:
-                data['horario'] = data['horario'].replace(tzinfo=None)
+            # Converte a hora (TimeStamp) para datetime Python Naive
+            if 'horario' in data:
+                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             
             return data
+            
+        return None
     except Exception as e:
         print(f"ERRO NA BUSCA POR PIN: {e}")
-    return None
-
+        return None
 
 def buscar_todos_agendamentos():
-    """Busca todos os agendamentos no DB e retorna um DataFrame."""
-    query = f"SELECT * FROM {TABELA_AGENDAMENTOS} ORDER BY horario;"
+    """Busca todos os agendamentos e retorna um DataFrame."""
     try:
-        df = conn.query(query, ttl=0)
-        
-        if 'horario' in df.columns:
-            # Limpa o timezone para compatibilidade Naive
-            df['horario'] = df['horario'].apply(lambda x: x.replace(tzinfo=None) if x else x)
-            return df
+        docs = db.collection(COLECAO_AGENDAMENTOS).stream()
+        data = []
+        for doc in docs:
+            item = doc.to_dict()
+            item['id'] = doc.id
+            if 'horario' in item:
+                item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
+            data.append(item)
+            
+        return pd.DataFrame(data).sort_values(by='horario')
     except Exception as e:
         print(f"ERRO NA BUSCA TOTAL: {e}")
-    return pd.DataFrame()
+        return pd.DataFrame()
 
 
-def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
-    """Atualiza o status de um agendamento específico."""
-    
-    query = f"""
-    UPDATE {TABELA_AGENDAMENTOS} SET status = %(status)s 
-    WHERE id = %(id_agendamento)s;
-    """
-    params = {
-        'status': novo_status,
-        'id_agendamento': id_agendamento
-    }
-    
+def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
+    """Atualiza o status de um agendamento específico (usa ID de documento)."""
     try:
-        conn.query(query, params=params, ttl=0, write=True)
+        # Usa o ID (string) do documento para fazer o update
+        doc_ref = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento)
+        doc_ref.update({'status': novo_status})
         return True
     except Exception as e:
         print(f"ERRO AO ATUALIZAR STATUS: {e}")
         return False
         
-def buscar_agendamento_por_id(id_agendamento: int):
-    """Busca um agendamento pelo ID (usado pelo Admin para ações rápidas)."""
-    query = f"""
-    SELECT * FROM {TABELA_AGENDAMENTOS} WHERE id = %(id)s LIMIT 1;
-    """
+def buscar_agendamento_por_id(id_agendamento: str):
+    """Busca um agendamento pelo ID do documento do Firestore."""
     try:
-        df = conn.query(query, params={'id': id_agendamento}, ttl=0)
-        if not df.empty:
-            data = df.iloc[0].to_dict()
-            if data['horario']:
-                data['horario'] = data['horario'].replace(tzinfo=None)
+        doc = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento).get()
+        if doc.exists:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            if 'horario' in data:
+                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             return data
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
