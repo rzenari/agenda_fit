@@ -1,45 +1,44 @@
-# database.py (VERSÃO FINAL E ROBUSTA PARA FIRESTORE)
+# database.py (VERSÃO FINAL COM REMONTAGEM DA CHAVE)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, date
-import json # Necessário para decodificar a string JSON
+from datetime import datetime
+import json 
 from google.cloud import firestore
 
 # --- Inicialização da Conexão (Sem problemas de porta/firewall) ---
 @st.cache_resource
 def get_firestore_client():
     """
-    Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
-    Faz o tratamento de caracteres inválidos (quebras de linha).
+    Inicializa o cliente Firestore lendo os campos individuais dos Secrets
+    e remontando o JSON da Service Account.
     """
     try:
-        # 1. Leitura da string JSON completa
-        json_credenciais = st.secrets["firestore"]["json_key_string"]
+        # Lendo os campos individuais (que são mais estáveis no parser TOML)
+        secrets = st.secrets["firestore"]
         
-        # 2. TRATAMENTO CRÍTICO:
-        # A. Remove espaços em branco desnecessários.
-        json_credenciais = json_credenciais.strip()
-        
-        # B. Corrigir quebras de linha (substitui o literal \n por \\n para que json.loads o interprete corretamente)
-        # ESTE É O PASSO QUE RESOLVE O PROBLEMA DE 'control character'
-        # Nota: Se o JSON foi colado com aspas triplas, o Python vê as quebras de linha
-        # Vamos assumir que a string foi colada com aspas simples, ou sem formatação extra.
-        
-        # Tenta decodificar a string para um objeto JSON (dicionário)
-        credenciais_dict = json.loads(json_credenciais)
+        # O Google Cloud exige o objeto JSON completo. Vamos remontá-lo.
+        # Adicionei os campos token_uri e client_email que estavam faltando na última tentativa de erro
+        credenciais_dict = {
+            "type": secrets["type"],
+            "project_id": secrets["project_id"],
+            "private_key_id": secrets["private_key_id"],
+            "private_key": secrets["private_key"], # Já escapado no Secrets
+            "client_email": secrets["client_email"],
+            "token_uri": secrets["token_uri"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            # Adicionei um campo que é constante, mas pode ser exigido
+            "client_id": "NAO_NECESSARIO_PARA_AUTH" 
+        }
 
-        # 3. Usa o dicionário decodificado para autenticar
+        # Usa o dicionário remontado para autenticar
         return firestore.Client.from_service_account_info(credenciais_dict)
-    except KeyError:
-        st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
-        st.stop()
-    except json.JSONDecodeError as e:
-        # Se houver erro, detalhamos o problema (o que é mais útil para o debug)
-        st.error(f"Erro de Formato JSON. Detalhe: {e}. Verifique as aspas/quebras de linha da Private Key nos Secrets.")
+    except KeyError as e:
+        st.error(f"Erro Crítico: Falta o campo {e} nos Secrets. Verifique se todos os campos estão configurados.")
         st.stop()
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as permissões da Service Account.")
+        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}")
         st.stop()
 
 db = get_firestore_client()
@@ -129,4 +128,5 @@ def buscar_agendamento_por_id(id_agendamento: str):
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
+
 
