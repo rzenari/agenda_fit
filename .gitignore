@@ -1,16 +1,25 @@
-# Arquivos de Cache e Build
-__pycache__/
-*.pyc
+# Arquivos de Sistema Operacional e IDEs
+.DS_Store
+.vscode/
 
-# Ambientes Virtuais (CRÍTICO)
+# Ambientes Virtuais Python
 venv/
 .venv/
 env/
+# Pode ser necessário adicionar o nome da sua pasta venv específica, se for diferente de 'venv'
 
-# Arquivos de Configuração Local do Streamlit (CRÍTICO!)
-.streamlit/secrets.toml  # <-- ESSA LINHA ESCONDE SUAS CHAVES
-.streamlit/config.toml
+# Arquivos de Cache e Compilação Python
+__pycache__/
+*.pyc
+*.o
+*.so
+*~
 
-# Bancos de Dados Locais
+# Arquivos de Dados Locais (CRÍTICO)
 *.db
 agenda.db
+.ipynb_checkpoints/ # Para quem usa Jupyter Notebooks
+
+# Arquivos de Configuração do Streamlit (CRÍTICO DE SEGURANÇA)
+.streamlit/secrets.toml  # Impede o upload das suas chaves de API/DB
+.streamlit/config.toml
