@@ -3,12 +3,8 @@ from datetime import datetime, time
 import pandas as pd
 import random
 
-# Importa as lógicas e o NOVO DB Supabase de forma segura com parênteses
-from database import (
-    salvar_agendamento, 
-    buscar_agendamento_por_token, 
-    buscar_todos_agendamentos
-)
+# IMPORTAÇÕES SIMPLIFICADAS: Importa todas as funções de DB (database.py) e Lógica (logica_negocio.py)
+from database import *
 from logica_negocio import (
     gerar_token_unico, 
     horario_esta_disponivel, 
@@ -26,8 +22,7 @@ PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutri
 @st.cache_resource
 def setup_database():
     """Chama a função de inicialização do DB."""
-    # A função init_supabase está dentro do database.py e é chamada aqui
-    from database import init_supabase 
+    # A função init_supabase agora está disponível via from database import *
     return init_supabase()
 
 db_client = setup_database()
@@ -52,6 +47,7 @@ def render_agendamento_seguro():
         return
 
     # Busca o agendamento no DB Supabase
+    # Aqui, a função é chamada diretamente, pois foi importada via 'from database import *'
     agendamento = buscar_agendamento_por_token(token)
     
     if agendamento and agendamento['status'] == "Confirmado":
@@ -118,6 +114,7 @@ def render_backoffice_admin():
                     token = gerar_token_unico()
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     
+                    # Chama a função de salvamento
                     if salvar_agendamento(dados, token):
                         st.success(f"Consulta agendada para {cliente}.")
                         
