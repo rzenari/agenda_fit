@@ -1,4 +1,5 @@
-# database.py 
+# database.py (CORRIGIDO)
+
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
@@ -10,14 +11,12 @@ import uuid
 def init_supabase() -> Client:
     """Inicializa e armazena o cliente Supabase usando st.secrets."""
     try:
-        # AQUI é onde ele LÊ o que você COLOU na tela Secrets
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
         
-        # Cria e retorna o cliente Supabase
         return create_client(url, key)
     except KeyError:
-        st.error("Erro de Configuração: As chaves 'url' ou 'key' do Supabase não foram encontradas no st.secrets. Verifique o formato TOML.")
+        st.error("Erro de Configuração: As chaves 'url' ou 'key' do Supabase não foram encontradas no st.secrets.")
         st.stop() 
     except Exception as e:
         st.error(f"Erro de Conexão com Supabase. Verifique a URL/KEY. Erro: {e}")
@@ -38,38 +37,45 @@ def salvar_agendamento(dados: dict, token: str):
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': dados['horario'].isoformat(), # Converte datetime para string ISO
+        'horario': dados['horario'].isoformat(), # Garante que a data seja salva em formato string
         'status': "Confirmado",
         'is_pacote_sessao': False 
     }
     
     if supabase:
-        # Insere dados na tabela 'agendamentos'
         response = supabase.table(TABELA_AGENDAMENTOS).insert(data_para_salvar).execute()
-        # O Streamlit Cloud pode mostrar um erro se a tabela não tiver sido criada corretamente!
         if response.data:
             return response.data
     return None
 
 def buscar_agendamento_por_token(token: str):
-    """Busca um agendamento específico usando o token de segurança."""
+    """
+    Busca um agendamento específico usando o token de segurança.
+    CORREÇÃO: Usa Pandas para converter a data do Supabase de forma robusta.
+    """
     if supabase:
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).execute()
         
         if response.data:
-            # Converte a string de horário de volta para datetime
             data = response.data[0]
-            data['horario'] = datetime.fromisoformat(data['horario'].replace('Z', '+00:00')) # Trata o formato ISO 8601
-            return data
+            
+            # Converte o registro (que é um dicionário) para DataFrame
+            df_temp = pd.DataFrame([data])
+            
+            # Converte a coluna 'horario' usando Pandas
+            df_temp['horario'] = pd.to_datetime(df_temp['horario'])
+            
+            # Retorna o registro convertido como dicionário
+            return df_temp.iloc[0].to_dict()
     return None
 
 def buscar_todos_agendamentos():
-    """Busca todos os agendamentos no DB."""
+    """Busca todos os agendamentos no DB e retorna um DataFrame."""
     if supabase:
-        # ORDER BY para obter dados organizados
         response = supabase.table(TABELA_AGENDAMENTOS).select("*").order("horario").execute()
         if response.data:
             df = pd.DataFrame(response.data)
+            # Converte a coluna 'horario' de forma robusta
             df['horario'] = pd.to_datetime(df['horario'])
             return df
     return pd.DataFrame()
@@ -77,7 +83,7 @@ def buscar_todos_agendamentos():
 def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
     """Atualiza o status de um agendamento específico."""
     if supabase:
-        # O ID deve ser o ID da linha no Supabase
+        # Busca pelo ID da linha no Supabase
         response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
         return response.data
     return None
