@@ -1,9 +1,11 @@
-# logica_negocio.py (CORRIGIDO)
+# logica_negocio.py (COMPLETO E FINAL)
 
 import uuid
 from datetime import datetime, date
-from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
 import pandas as pd
+
+# IMPORTAÇÃO CORRIGIDA (EM UMA ÚNICA LINHA):
+from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_token
 
 def gerar_token_unico():
     """Gera um UUID seguro para links de gestão do cliente."""
@@ -12,20 +14,19 @@ def gerar_token_unico():
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     """
     Verifica se o horário está livre, consultando o DB (DataFrame).
-    CORREÇÃO: Usa .dt.tz_localize(None) para forçar uma comparação sem fuso horário.
+    Garante que a comparação seja feita sem fuso horário.
     """
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
     
-    # Prepara a data de entrada do usuário, garantindo que não tenha timezone para a comparação
+    # Prepara a data de entrada do usuário
     data_hora_naive = data_hora.replace(tzinfo=None)
         
-    # Filtra por profissional e status
+    # Filtra por profissional, data/hora e status
     conflito = df[
         (df['profissional'] == profissional) &
-        # Compara a data/hora do DB (após remover o timezone) com a data/hora do usuário
-        (df['horario'].dt.tz_localize(None) == data_hora_naive) & 
+        (df['horario'] == data_hora_naive) & 
         (df['status'].isin(["Confirmado", "Em Andamento"]))
     ]
     
