@@ -1,17 +1,13 @@
+# app.py (COMPLETO E FINAL)
+
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# IMPORTAÇÕES SIMPLIFICADAS: Importa todas as funções de DB (database.py) e Lógica (logica_negocio.py)
-from database import *
-from logica_negocio import (
-    gerar_token_unico, 
-    horario_esta_disponivel, 
-    processar_cancelamento_seguro, 
-    get_relatorio_no_show, 
-    buscar_agendamentos_hoje
-)
+# IMPORTAÇÕES SEGURAS E CORRETAS:
+from database import init_supabase, salvar_agendamento, buscar_agendamento_por_token, buscar_todos_agendamentos
+from logica_negocio import gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, get_relatorio_no_show, buscar_agendamentos_hoje
 
 
 # --- Configuração ---
@@ -22,7 +18,7 @@ PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutri
 @st.cache_resource
 def setup_database():
     """Chama a função de inicialização do DB."""
-    # A função init_supabase agora está disponível via from database import *
+    # init_supabase é importado diretamente de database
     return init_supabase()
 
 db_client = setup_database()
@@ -47,7 +43,6 @@ def render_agendamento_seguro():
         return
 
     # Busca o agendamento no DB Supabase
-    # Aqui, a função é chamada diretamente, pois foi importada via 'from database import *'
     agendamento = buscar_agendamento_por_token(token)
     
     if agendamento and agendamento['status'] == "Confirmado":
@@ -114,16 +109,14 @@ def render_backoffice_admin():
                     token = gerar_token_unico()
                     dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
                     
-                    # Chama a função de salvamento
                     if salvar_agendamento(dados, token):
                         st.success(f"Consulta agendada para {cliente}.")
                         
-                        # Gerando o link de gestão para o profissional enviar
                         link_base = f"https://agendafit.streamlit.app" # Substituir pelo seu link real
                         link_gestao = f"{link_base}?token={token}"
                         
                         st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{link_gestao}`")
-                        st.rerun() # Recarrega a tela para atualizar a agenda
+                        st.rerun() 
                     else:
                         st.error("Erro ao salvar no banco de dados. Verifique a conexão do Supabase.")
                 else:
