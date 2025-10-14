@@ -1,84 +1,75 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+# database.py (NOVO - USANDO SUPABASE)
+
+import streamlit as st
+from supabase import create_client, Client
 from datetime import datetime
 import pandas as pd
+import uuid
 
-# Conexão com SQLite no mesmo diretório
-# IMPORTANTE: O Streamlit Cloud vai criar este arquivo no deploy
-DATABASE_URL = "sqlite:///agenda.db"
-Base = declarative_base()
+# --- Inicialização da Conexão ---
+@st.cache_resource
+def init_supabase() -> Client:
+    """Inicializa e armazena o cliente Supabase usando st.secrets."""
+    try:
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Erro ao conectar ao Supabase. Verifique seu secrets.toml e a URL/KEY. Erro: {e}")
+        return None
 
-# --- Definição da Tabela (Modelo de Dados) ---
-class Agendamento(Base):
-    __tablename__ = 'agendamentos'
-    
-    id = Column(Integer, primary_key=True, index=True)
-    
-    # Segurança e Rastreamento
-    token_unico = Column(String, unique=True, index=True) 
-    
-    # Dados da Sessão
-    profissional = Column(String, index=True)
-    cliente = Column(String)
-    telefone = Column(String) 
-    horario = Column(DateTime, index=True)
-    
-    # Status
-    status = Column(String, default="Confirmado") # Confirmado, Cancelado, No-Show, Finalizado
-    
-    # Gestão de Pacotes (Novo Recurso)
-    is_pacote_sessao = Column(Boolean, default=False)
-    sessao_pacote_id = Column(String, nullable=True) 
+# Variável de conexão Supabase
+supabase: Client = init_supabase()
+TABELA_AGENDAMENTOS = "agendamentos"
 
-    def __repr__(self):
-        return f"Agendamento(ID={self.id}, Cliente={self.cliente})"
 
 # --- Funções de Operação no Banco de Dados ---
 
-def iniciar_db():
-    """Cria o arquivo agenda.db e a tabela se não existirem."""
-    engine = create_engine(DATABASE_URL)
-    Base.metadata.create_all(engine)
-    return engine
+def salvar_agendamento(dados: dict, token: str):
+    """Cria um novo agendamento no DB Supabase."""
+    
+    # Prepara os dados no formato PostgreSQL/Supabase
+    data_para_salvar = {
+        'token_unico': token,
+        'profissional': dados['profissional'],
+        'cliente': dados['cliente'],
+        'telefone': dados['telefone'],
+        'horario': dados['horario'].isoformat(), # Converte datetime para string ISO
+        'status': "Confirmado",
+        'is_pacote_sessao': False # Valor padrão
+    }
+    
+    if supabase:
+        response = supabase.table(TABELA_AGENDAMENTOS).insert(data_para_salvar).execute()
+        return response.data
+    return None
 
-def get_session():
-    """Retorna uma sessão para interagir com o DB."""
-    engine = iniciar_db()
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    return SessionLocal()
-
-def salvar_agendamento(session, dados: dict, token: str):
-    """Cria um novo agendamento no DB."""
-    novo = Agendamento(
-        token_unico=token,
-        profissional=dados['profissional'],
-        cliente=dados['cliente'],
-        telefone=dados['telefone'],
-        horario=dados['horario'],
-    )
-    session.add(novo)
-    session.commit()
-    session.refresh(novo)
-    return novo
-
-def buscar_agendamento_por_token(session, token: str):
+def buscar_agendamento_por_token(token: str):
     """Busca um agendamento específico usando o token de segurança."""
-    return session.query(Agendamento).filter(Agendamento.token_unico == token).first()
-
-def buscar_agendamentos_hoje(session, profissional: str = None):
-    """Busca todos os agendamentos confirmados para hoje."""
-    data_hoje = datetime.now().date()
-    
-    query = session.query(Agendamento).filter(Agendamento.status == "Confirmado")
-    
-    if profissional:
-        query = query.filter(Agendamento.profissional == profissional)
+    if supabase:
+        response = supabase.table(TABELA_AGENDAMENTOS).select("*").eq("token_unico", token).execute()
         
-    # Retorna uma lista de agendamentos para a data de hoje
-    # Usamos list comprehension para filtrar pela data (porque SQLite não suporta função DATE nativamente com SQLAlchemy)
-    return [
-        agendamento 
-        for agendamento in query.all() 
-        if agendamento.horario.date() == data_hoje
-    ]
+        if response.data:
+            # Converte a string de horário de volta para datetime
+            data = response.data[0]
+            data['horario'] = datetime.fromisoformat(data['horario'])
+            return data
+    return None
+
+def buscar_todos_agendamentos():
+    """Busca todos os agendamentos no DB."""
+    if supabase:
+        response = supabase.table(TABELA_AGENDAMENTOS).select("*").execute()
+        if response.data:
+            # Converte para DataFrame e os horários para datetime
+            df = pd.DataFrame(response.data)
+            df['horario'] = pd.to_datetime(df['horario'])
+            return df
+    return pd.DataFrame()
+
+def atualizar_status_agendamento(id_agendamento: int, novo_status: str):
+    """Atualiza o status de um agendamento específico."""
+    if supabase:
+        response = supabase.table(TABELA_AGENDAMENTOS).update({"status": novo_status}).eq("id", id_agendamento).execute()
+        return response.data
+    return None
