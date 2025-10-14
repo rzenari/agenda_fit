@@ -45,9 +45,13 @@ def handle_agendamento_submission():
     data_consulta = st.session_state.c_data_input
     hora_consulta = st.session_state.c_hora_input
 
+    # Limpa a última mensagem de status
+    st.session_state.last_agendamento_info = None
+
     if not cliente:
-        # Não faz nada se o cliente estiver vazio
+        # Define a mensagem de erro no session_state para ser exibida no próximo run
         st.session_state.last_agendamento_info = {'status': "Nome do cliente é obrigatório.", 'cliente': ''}
+        st.rerun()
         return
 
     dt_consulta = datetime.combine(data_consulta, hora_consulta)
@@ -80,7 +84,8 @@ def handle_agendamento_submission():
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
 
     # 4. Dispara o Rerun para que a mensagem persistida apareça no topo
-    st.experimental_rerun() 
+    st.rerun() # <-- CORREÇÃO: Usando a função oficial
+    
 
 
 # --- FUNÇÃO DE AÇÃO GLOBAL (BOTÕES) ---
@@ -95,7 +100,7 @@ def handle_admin_action(id_agendamento, acao):
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
 
 def render_agendamento_seguro():
-    # [Função omitida, permanece a mesma]
+    """Renderiza a tela de cancelamento/remarcação via PIN (Módulo I - Cliente)."""
     st.title("🔒 Gestão do seu Agendamento")
     
     pin = st.query_params.get("pin", [None])[0]
@@ -160,10 +165,13 @@ def render_backoffice_admin():
             if info['status'] is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
-            else:
+            elif info['status'] is not None:
                 # EXIBE O ERRO DETALHADO DO DB AQUI
-                st.error(f"Erro ao salvar no banco de dados para {info['cliente']}. Motivo: {info['status']}")
-                
+                st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
+            
+            # Limpa o estado depois de exibir
+            st.session_state.last_agendamento_info = None
+
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
@@ -181,7 +189,7 @@ def render_backoffice_admin():
                 submitted = st.form_submit_button(
                     "AGENDAR NOVA SESSÃO", 
                     type="primary",
-                    on_click=handle_agendamento_submission # <-- CORREÇÃO CRÍTICA
+                    on_click=handle_agendamento_submission
                 )
 
         
@@ -232,13 +240,43 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2 e TAB 3 (omissões por brevidade) ---
+    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
-        # ... (código dos relatórios)
+        
+        df_relatorio = get_relatorio_no_show()
+        
+        if not df_relatorio.empty:
+            st.subheader("Taxa de No-Show Média vs. Profissional")
+            
+            total_atendimentos = df_relatorio['total_atendimentos'].sum()
+            total_faltas = df_relatorio['total_faltas'].sum()
+            taxa_media = (total_faltas / total_atendimentos) * 100 if total_atendimentos > 0 else 0
+
+            col1, col2 = st.columns(2)
+            col1.metric("Taxa Média de No-Show", f"{taxa_media:.2f}%")
+            col2.metric("Total de Sessões Ocorridas/Faltadas", total_atendimentos)
+
+            st.dataframe(df_relatorio.rename(columns={
+                'total_atendimentos': 'Total Sessões', 
+                'total_faltas': 'Faltas', 
+                'total_cancelados': 'Cancelados',
+                'total_finalizados': 'Finalizados',
+                'Taxa No-Show (%)': 'Taxa Falta (%)'
+            }), use_container_width=True, hide_index=True)
+
+            st.bar_chart(df_relatorio.set_index('profissional')['Taxa No-Show (%)'])
+        else:
+            st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
+
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
-        # ... (código de otimização)
+        st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
+        st.markdown("""
+        **Otimizador de Pacotes:**
+        1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
+        2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
+        """)
 
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
