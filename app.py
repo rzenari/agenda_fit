@@ -1,14 +1,14 @@
-# app.py (FINAL PARA FIRESTORE)
+# app.py (CORRIGIDO PARA REMOVER st.connection)
 
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
 import random
 
-# IMPORTAÇÕES CORRETAS
+# IMPORTAÇÕES CORRETAS: Removida a linha que tentava importar st.connection.
 from database import (
     get_firestore_client, salvar_agendamento, buscar_agendamento_por_pin, 
-    buscar_todos_agendamentos
+    buscar_todos_agendamentos, buscar_agendamento_por_id
 )
 from logica_negocio import (
     gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro, 
@@ -38,7 +38,6 @@ if 'last_agendamento_info' not in st.session_state:
 
 
 # --- FUNÇÃO DE AÇÃO GLOBAL ---
-# O ID do agendamento agora é uma string (ID do documento Firestore)
 def handle_admin_action(id_agendamento: str, acao):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada para o agendamento ID {id_agendamento}!")
@@ -48,6 +47,8 @@ def handle_admin_action(id_agendamento: str, acao):
 
 
 # --- FUNÇÕES DE RENDERIZAÇÃO ---
+# ... (O restante do código de renderização permanece o mesmo)
+
 
 def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via PIN (Módulo I - Cliente)."""
@@ -173,23 +174,19 @@ def render_backoffice_admin():
             for index, row in df_agenda.iterrows():
                 col_id, col_finalizar, col_no_show, col_cancelar = st.columns([0.5, 1, 1, 1])
                 
-                # Note que row['id'] agora é uma STRING do Firestore
                 col_id.markdown(f"**ID:** {row['id']}") 
 
-                # Botão para marcar como FINALIZADO
                 col_finalizar.button("✅ Sessão Concluída", 
                                      key=f"finish_{row['id']}", 
                                      on_click=handle_admin_action, 
                                      args=(row['id'], "finalizar"),
                                      type="primary")
                 
-                # Botão para marcar como NO-SHOW (Falta)
                 col_no_show.button("🚫 Marcar Falta", 
                                   key=f"noshow_{row['id']}", 
                                   on_click=handle_admin_action, 
                                   args=(row['id'], "no-show"))
 
-                # Botão para Cancelar
                 col_cancelar.button("❌ Cancelar", 
                                     key=f"cancel_{row['id']}", 
                                     on_click=handle_admin_action, 
