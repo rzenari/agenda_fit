@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM FORMULÁRIO DE CADASTRO RESTAURADO)
+# app.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -13,7 +13,7 @@ from database import (
 )
 from logica_negocio import (
     gerar_token_unico, horario_esta_disponivel, processar_cancelamento_seguro,
-    get_relatorio_no_show, acao_admin_agendamento, buscar_agendamentos_hoje,
+    get_relatorio_no_show, acao_admin_agendamento, buscar_agendamentos_por_data,
     processar_remarcacao
 )
 
@@ -21,7 +21,6 @@ from logica_negocio import (
 # --- Configuração ---
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutrição)"]
-# Define o fuso horário padrão para toda a aplicação
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 
 # Inicialização do DB
@@ -37,6 +36,9 @@ if 'remarcando' not in st.session_state:
     st.session_state.remarcando = False
 if 'agendamentos_selecionados' not in st.session_state:
     st.session_state.agendamentos_selecionados = {}
+# Adiciona o filtro de data ao session state, com o valor padrão sendo hoje
+if 'data_filtro_agenda' not in st.session_state:
+    st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
 
 
 # --- FUNÇÕES DE CALLBACK E AÇÕES ---
@@ -50,7 +52,6 @@ def handle_agendamento_submission():
         st.warning("Nome do cliente é obrigatório.")
         return
 
-    # Garante que o horário criado seja localizado para São Paulo
     dt_consulta_naive = datetime.combine(data_consulta, hora_consulta)
     dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
 
@@ -67,6 +68,8 @@ def handle_agendamento_submission():
         if resultado is True:
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'status': True}
+            # Define o filtro da agenda para a data do novo agendamento
+            st.session_state.data_filtro_agenda = data_consulta
             st.session_state.c_nome_input, st.session_state.c_tel_input = "", ""
         else:
             st.session_state.last_agendamento_info = {'status': str(resultado)}
@@ -79,7 +82,6 @@ def handle_remarcar_confirmacao(pin, agendamento_id):
     nova_data = st.session_state.nova_data_remarcacao
     nova_hora = st.session_state.nova_hora_remarcacao
     
-    # Garante que o novo horário seja localizado para São Paulo
     novo_horario_naive = datetime.combine(nova_data, nova_hora)
     novo_horario_local = novo_horario_naive.replace(tzinfo=TZ_SAO_PAULO)
 
@@ -137,7 +139,6 @@ def render_agendamento_seguro():
         st.warning(f"Este agendamento já se encontra com o status: **{agendamento['status']}**.")
         return
     
-    # Exibe o horário sempre formatado para o fuso correto
     st.info(f"Seu agendamento com **{agendamento['profissional']}** está CONFIRMADO para:")
     st.subheader(f"{agendamento['horario'].strftime('%d/%m/%Y')} às {agendamento['horario'].strftime('%H:%M')}")
     st.caption(f"Cliente: {agendamento['cliente']}")
@@ -179,7 +180,6 @@ def render_backoffice_admin():
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
-        # --- CÓDIGO DO FORMULÁRIO RESTAURADO ---
         if st.session_state.get('last_agendamento_info'):
             info = st.session_state.last_agendamento_info
             if info.get('status'):
@@ -200,13 +200,21 @@ def render_backoffice_admin():
             with col3:
                 st.time_input("Hora:", key="c_hora_input", step=timedelta(minutes=30))
                 st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
-        # --- FIM DO CÓDIGO RESTAURADO ---
 
-        st.subheader("🗓️ Agenda de Hoje (Apenas Confirmados)")
-        agenda_hoje = buscar_agendamentos_hoje()
+        st.markdown("---")
+        st.header("🗓️ Agenda")
+        
+        # Filtro de data para a agenda
+        data_selecionada = st.date_input(
+            "Filtrar por data:",
+            key='data_filtro_agenda',
+            format="DD/MM/YYYY"
+        )
 
-        if not agenda_hoje.empty:
-            for index, row in agenda_hoje.iterrows():
+        agenda_do_dia = buscar_agendamentos_por_data(data_selecionada)
+
+        if not agenda_do_dia.empty:
+            for index, row in agenda_do_dia.iterrows():
                 ag_id = row['id']
                 if ag_id not in st.session_state.agendamentos_selecionados:
                     st.session_state.agendamentos_selecionados[ag_id] = False
@@ -224,7 +232,7 @@ def render_backoffice_admin():
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
-            st.info("Nenhuma consulta confirmada para hoje.")
+            st.info(f"Nenhuma consulta confirmada para {data_selecionada.strftime('%d/%m/%Y')}.")
             
     with tab2:
         st.header("📈 Relatórios de Faltas (No-Show)")
