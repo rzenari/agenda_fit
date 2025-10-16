@@ -1,4 +1,4 @@
-# logica_negocio.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
+# logica_negocio.py (VERSÃO COM CORREÇÃO DE ÍNDICE E KEYERROR)
 
 from datetime import datetime, timedelta, timezone, date, time
 import pandas as pd
@@ -64,16 +64,24 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
         return False, "Ocorreu um erro ao tentar salvar a remarcação."
 
 def buscar_agendamentos_por_data(data_selecionada: date):
-    """Busca todos os agendamentos confirmados para uma data específica (fuso de São Paulo)."""
-    # Define o início e o fim do dia selecionado no fuso de São Paulo
+    """
+    Busca todos os agendamentos para uma data específica e depois filtra por status 'Confirmado'.
+    Isso evita a necessidade de um índice composto no Firestore.
+    """
     inicio_dia_local = datetime.combine(data_selecionada, time.min).replace(tzinfo=TZ_SAO_PAULO)
     fim_dia_local = datetime.combine(data_selecionada, time.max).replace(tzinfo=TZ_SAO_PAULO)
     
-    # Converte os limites para UTC para consultar o banco de dados
     inicio_dia_utc = inicio_dia_local.astimezone(timezone.utc)
     fim_dia_utc = fim_dia_local.astimezone(timezone.utc)
     
-    return pd.DataFrame(buscar_agendamentos_por_intervalo(inicio_dia_utc, fim_dia_utc))
+    agendamentos = buscar_agendamentos_por_intervalo(inicio_dia_utc, fim_dia_utc)
+    df = pd.DataFrame(agendamentos)
+    
+    if not df.empty:
+        # Filtra por status "Confirmado" aqui, no código, em vez de na query do banco
+        df = df[df['status'] == 'Confirmado']
+        
+    return df
 
 def get_relatorio_no_show() -> pd.DataFrame:
     """Gera um relatório de faltas (no-show)."""
