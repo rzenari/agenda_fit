@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL com Retorno de Mensagem de Erro)
+# database.py (VERSÃO FINAL COM DIAGNÓSTICO DE CREDENCIAIS)
 
 import streamlit as st
 import pandas as pd
@@ -11,17 +11,27 @@ from google.cloud import firestore
 def get_firestore_client():
     """
     Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
+    Faz diagnóstico se a autenticação falhar.
     """
     try:
-        # Lembre-se: 'json_key_string' deve ser o nome da chave nos Secrets
+        # 1. Leitura da string JSON completa
         json_credenciais = st.secrets["firestore"]["json_key_string"]
-        
-        # O Python decodifica a string para um objeto JSON (dicionário)
         credenciais_dict = json.loads(json_credenciais)
 
+        # 2. DEBUG CRÍTICO: Imprime no console se o project_id está sendo lido
+        print(f"DEBUG: Project ID lido: {credenciais_dict.get('project_id', 'FALHA AO LER PROJECT ID')}")
+        
+        # 3. Usa o dicionário decodificado para autenticar
         return firestore.Client.from_service_account_info(credenciais_dict)
+    except KeyError:
+        st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
+        st.stop()
+    except json.JSONDecodeError as e:
+        st.error(f"Erro de formato JSON. Detalhe: {e}. Verifique as aspas/quebras de linha da Private Key nos Secrets.")
+        st.stop()
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as permissões da Service Account.")
+        # AQUI ESTÁ O TRATAMENTO DO ERRO DE AUTENTICAÇÃO DO GOOGLE
+        st.error(f"Erro ao conectar ao Google Firestore. Motivo: Falha de autenticação. (Detalhe: {e})")
         st.stop()
 
 db = get_firestore_client()
