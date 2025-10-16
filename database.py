@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL COM BUSCA DUPLA DE PIN)
+# database.py (VERSÃO FINAL COM PADRONIZAÇÃO DE PIN PARA STRING)
 
 import streamlit as st
 import pandas as pd
@@ -25,14 +25,9 @@ COLECAO_AGENDAMENTOS = "agendamentos"
 # --- Funções de Operação no Banco de Dados (NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo documento no Firestore. Tenta salvar o PIN como número se possível."""
-    try:
-        pin_value = int(pin_code)
-    except (ValueError, TypeError):
-        pin_value = str(pin_code)
-
+    """Cria um novo documento no Firestore, garantindo que o PIN seja sempre salvo como string."""
     data_para_salvar = {
-        'pin_code': pin_value,
+        'pin_code': str(pin_code),  # PADRONIZADO: Garante que o PIN é sempre salvo como texto.
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
@@ -48,48 +43,27 @@ def salvar_agendamento(dados: dict, pin_code: str):
 
 def buscar_agendamento_por_pin(pin_code: str):
     """
-    Busca um agendamento pelo PIN, tentando a busca como STRING e como NÚMERO
-    para garantir a compatibilidade com dados já existentes.
+    Busca um agendamento pelo PIN. A busca é feita apenas por STRING,
+    pois o salvamento foi padronizado.
     """
-    print(f"--- [DEBUG DB] Iniciando busca por PIN: {pin_code} ---")
+    print(f"--- [DEBUG DB] Iniciando busca por PIN (string): '{pin_code}' ---")
 
     try:
-        # --- TENTATIVA 1: Buscar como STRING ---
-        print(f"--- [DEBUG DB] Tentativa 1: Buscando como STRING '{pin_code}'...")
-        query_str = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1)
-        docs = query_str.get()
+        # Busca única e direta por STRING, que agora é o padrão.
+        query = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1)
+        docs = query.get()
         
         if docs:
-            print(f"--- [DEBUG DB] SUCESSO (String)! Documento encontrado: {docs[0].id} ---")
+            print(f"--- [DEBUG DB] SUCESSO! Documento encontrado: {docs[0].id} ---")
             doc = docs[0]
             data = doc.to_dict()
             data['id'] = doc.id 
             if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             return data
-
-        # --- TENTATIVA 2: Buscar como NÚMERO ---
-        try:
-            pin_as_int = int(pin_code)
-            print(f"--- [DEBUG DB] Tentativa 2: Buscando como NÚMERO {pin_as_int}...")
-            query_int = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', pin_as_int)).limit(1)
-            docs_int = query_int.get()
-
-            if docs_int:
-                print(f"--- [DEBUG DB] SUCESSO (Número)! Documento encontrado: {docs_int[0].id} ---")
-                doc = docs_int[0]
-                data = doc.to_dict()
-                data['id'] = doc.id
-                if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
-                    data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
-                return data
-        except (ValueError, TypeError):
-             print(f"--- [DEBUG DB] PIN '{pin_code}' não é um número válido, pulando a busca numérica. ---")
-
-
-        # --- Se ambas as tentativas falharem ---
-        print(f"--- [DEBUG DB] FALHA: Nenhuma das tentativas encontrou o PIN: {pin_code} ---")
-        return None
+        else:
+            print(f"--- [DEBUG DB] FALHA: Nenhum documento encontrado para o PIN: '{pin_code}' ---")
+            return None
             
     except Exception as e:
         print(f"--- [DEBUG DB] ERRO CRÍTICO DURANTE A EXECUÇÃO DA QUERY: {e} ---")
