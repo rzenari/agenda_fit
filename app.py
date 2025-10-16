@@ -35,7 +35,7 @@ if 'last_agendamento_info' not in st.session_state:
 if 'remarcando' not in st.session_state:
     st.session_state.remarcando = False
 if 'agendamentos_selecionados' not in st.session_state:
-    st.session_state.agendamentos_selecionados = []
+    st.session_state.agendamentos_selecionados = {}
 
 
 # --- FUNÇÕES DE CALLBACK ---
@@ -66,6 +66,7 @@ def handle_agendamento_submission():
             st.session_state.last_agendamento_info = {'status': str(resultado)}
     else:
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro."}
+    st.rerun()
 
 def handle_remarcar_confirmacao(pin, agendamento_id):
     nova_data = st.session_state.nova_data_remarcacao
@@ -80,9 +81,10 @@ def handle_remarcar_confirmacao(pin, agendamento_id):
         st.session_state.remarcando = False
     else:
         st.error(mensagem)
+    st.rerun()
 
 def handle_cancelar_selecionados():
-    ids_para_cancelar = st.session_state.agendamentos_selecionados
+    ids_para_cancelar = [ag_id for ag_id, selecionado in st.session_state.agendamentos_selecionados.items() if selecionado]
     if not ids_para_cancelar:
         st.warning("Nenhum agendamento selecionado.")
         return
@@ -93,7 +95,7 @@ def handle_cancelar_selecionados():
             sucessos += 1
     
     st.success(f"{sucessos} de {len(ids_para_cancelar)} agendamentos cancelados com sucesso.")
-    st.session_state.agendamentos_selecionados = [] # Limpa a seleção
+    st.session_state.agendamentos_selecionados = {} # Limpa a seleção
     st.rerun()
 
 
@@ -116,14 +118,11 @@ def render_agendamento_seguro():
         st.warning(f"Este agendamento já se encontra com o status: **{agendamento['status']}**.")
         return
     
-    # Exibe informações do agendamento
     st.info(f"Seu agendamento com **{agendamento['profissional']}** está CONFIRMADO para:")
     st.subheader(f"{agendamento['horario'].strftime('%d/%m/%Y')} às {agendamento['horario'].strftime('%H:%M')}")
     st.caption(f"Cliente: {agendamento['cliente']}")
-
     st.markdown("---")
 
-    # Lógica para alternar entre visualização e remarcação
     if st.session_state.remarcando:
         with st.form("form_remarcacao"):
             st.subheader("Selecione o novo horário")
@@ -131,12 +130,7 @@ def render_agendamento_seguro():
             col1.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
             col2.time_input("Nova hora", key="nova_hora_remarcacao", step=timedelta(minutes=30))
             
-            st.form_submit_button(
-                "✅ Confirmar Remarcação",
-                on_click=handle_remarcar_confirmacao,
-                args=(pin, agendamento['id']),
-                use_container_width=True
-            )
+            st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id']), use_container_width=True)
         if st.button("Cancelar Remarcação", use_container_width=True):
             st.session_state.remarcando = False
             st.rerun()
@@ -163,7 +157,6 @@ def render_backoffice_admin():
     tab1, tab2 = st.tabs(["Agenda e Agendamento", "Relatórios"])
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
-        # Formulário de agendamento
         if st.session_state.get('last_agendamento_info'):
             info = st.session_state.last_agendamento_info
             if info.get('status'):
@@ -173,36 +166,48 @@ def render_backoffice_admin():
                 st.error(f"Erro: {info['status']}")
             st.session_state.last_agendamento_info = None
 
-        with st.form("admin_form", clear_on_submit=True):
-            # ... (código do formulário)
-            submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
+        with st.form("admin_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.text_input("Nome do Cliente:", key="c_nome_input")
+                st.text_input("Telefone:", key="c_tel_input")
+            with col2:
+                st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
+                st.date_input("Data:", key="c_data_input", min_value=date.today())
+            with col3:
+                st.time_input("Hora:", key="c_hora_input", step=timedelta(minutes=30))
+                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
 
         st.subheader("🗓️ Agenda de Hoje")
         agenda_hoje = buscar_agendamentos_hoje()
 
         if not agenda_hoje.empty:
-            # Layout com checkboxes para seleção
-            for _, row in agenda_hoje.iterrows():
+            for index, row in agenda_hoje.iterrows():
                 ag_id = row['id']
-                cols = st.columns([0.1, 0.8, 1, 1, 1])
-                with cols[0]:
-                    st.checkbox("", key=f"select_{ag_id}", value=ag_id in st.session_state.agendamentos_selecionados,
-                                on_change=lambda id: st.session_state.agendamentos_selecionados.append(id) if st.session_state[f"select_{id}"] else st.session_state.agendamentos_selecionados.remove(id),
-                                args=(ag_id,))
-                with cols[1]:
-                    st.write(f"**{row['cliente']}** ({row['horario'].strftime('%H:%M')})")
-                cols[2].button("✅ Concluída", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"))
-                cols[3].button("🚫 Falta", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"))
-                cols[4].button("❌ Cancelar", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"))
+                if ag_id not in st.session_state.agendamentos_selecionados:
+                    st.session_state.agendamentos_selecionados[ag_id] = False
+                
+                cols = st.columns([0.1, 0.8, 0.5, 0.5, 0.5])
+                selecionado = cols[0].checkbox("", key=f"select_{ag_id}", value=st.session_state.agendamentos_selecionados[ag_id])
+                st.session_state.agendamentos_selecionados[ag_id] = selecionado
+                
+                cols[1].write(f"**{row['cliente']}** ({row['horario'].strftime('%H:%M')})")
+                cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
             
             st.markdown("---")
-            if st.session_state.agendamentos_selecionados:
+            if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
     with tab2:
-        #... (código dos relatórios)
-        pass
+        st.header("📈 Relatórios de Faltas (No-Show)")
+        df_relatorio = get_relatorio_no_show()
+        if not df_relatorio.empty:
+            st.dataframe(df_relatorio)
+        else:
+            st.info("Ainda não há dados para gerar relatórios.")
 
 
 # --- ROTEAMENTO PRINCIPAL ---
