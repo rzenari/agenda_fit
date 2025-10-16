@@ -1,4 +1,4 @@
-# logica_negocio.py (VERSÃO FINAL com Correção da Lógica de Hoje)
+# logica_negocio.py (MODIFICAÇÃO TEMPORÁRIA DE DEBUG)
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -13,7 +13,7 @@ def gerar_token_unico():
     return str(random.randint(100000, 999999))
 
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
-    """Verifica se o horário está livre, consultando o DB (DataFrame)."""
+# [Código omitido, permanece o mesmo]
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
@@ -29,8 +29,7 @@ def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
     return conflito.empty
 
 def processar_cancelamento_seguro(pin_code: str) -> bool:
-    """Cancela o agendamento apenas se o PIN for válido e o status for 'Confirmado'."""
-    
+# [Código omitido, permanece o mesmo]
     agendamento = buscar_agendamento_por_pin(pin_code)
     
     if agendamento and agendamento['status'] == "Confirmado":
@@ -40,8 +39,7 @@ def processar_cancelamento_seguro(pin_code: str) -> bool:
     return False
 
 def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
-    """Executa ações rápidas (Finalizar/Cancelar/No-Show) pelo painel Admin."""
-    
+# [Código omitido, permanece o mesmo]
     status_map = {
         "cancelar": "Cancelado (Admin)",
         "finalizar": "Finalizado",
@@ -55,7 +53,7 @@ def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
     return False
 
 def get_relatorio_no_show() -> pd.DataFrame:
-    """Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional."""
+# [Código omitido, permanece o mesmo]
     df = buscar_todos_agendamentos()
     
     if df.empty:
@@ -80,21 +78,8 @@ def get_relatorio_no_show() -> pd.DataFrame:
     return df_grouped.sort_values(by='Taxa No-Show (%)', ascending=False).reset_index()
 
 def buscar_agendamentos_hoje():
-    """Busca apenas os agendamentos confirmados para o dia de hoje, usando filtro por intervalo."""
-    
-    # 1. Define o intervalo de hoje (da 00:00:00 de hoje até 00:00:00 de amanhã)
-    hoje_data = datetime.now().date()
-    # Cria o objeto datetime naive no fuso local (00:00:00)
-    start_of_day = datetime.combine(hoje_data, time.min) 
-    end_of_day = start_of_day + timedelta(days=1)
-    
-    # 2. Chama a busca por intervalo (filtra no Firestore)
-    df = buscar_agendamentos_por_intervalo(start_of_day, end_of_day)
-    
-    if df.empty:
-        return pd.DataFrame()
-        
-    # 3. Filtra apenas os confirmados
-    df_hoje = df[df['status'] == 'Confirmado']
-    
-    return df_hoje.sort_values(by='horario')
+    """
+    ***MUDANÇA TEMPORÁRIA PARA DEBUG***
+    Retorna TODOS os agendamentos para isolar o problema de filtro de data.
+    """
+    return buscar_todos_agendamentos()
