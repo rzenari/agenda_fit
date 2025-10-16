@@ -1,6 +1,6 @@
-# logica_negocio.py (VERSÃO COM FILTRO DE STATUS E REVISÃO DE FUSO HORÁRIO)
+# logica_negocio.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
 
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone, date, time
 import pandas as pd
 import random
 from zoneinfo import ZoneInfo
@@ -11,7 +11,6 @@ from database import (
     atualizar_horario_agendamento
 )
 
-# Define o fuso horário padrão para toda a camada de lógica
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 
 def gerar_token_unico():
@@ -24,14 +23,12 @@ def horario_esta_disponivel(profissional: str, data_hora_local: datetime, id_ign
     if df.empty:
         return True
     
-    # Checa por conflitos apenas em agendamentos já confirmados
     conflitos = df[
         (df['profissional'] == profissional) &
         (df['horario'] == data_hora_local) &
         (df['status'] == "Confirmado")
     ]
     
-    # Se estiver remarcando, não considera o próprio agendamento como um conflito
     if id_ignorada and not conflitos.empty:
         conflitos = conflitos[conflitos['id'] != id_ignorada]
 
@@ -55,11 +52,9 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
     if not agendamento_atual:
         return False, "Agendamento original não encontrado."
 
-    # Impede remarcação para o passado
     if novo_horario_local < datetime.now(TZ_SAO_PAULO):
         return False, "Não é possível agendar para uma data ou hora no passado."
 
-    # Verifica se o novo horário está disponível
     if not horario_esta_disponivel(agendamento_atual['profissional'], novo_horario_local, id_ignorada=agendamento_id):
         return False, "O novo horário escolhido já está ocupado."
 
@@ -68,12 +63,11 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
     else:
         return False, "Ocorreu um erro ao tentar salvar a remarcação."
 
-def buscar_agendamentos_hoje():
-    """Busca todos os agendamentos confirmados para o dia de hoje (fuso de São Paulo)."""
-    # Define o início e o fim do dia de hoje no fuso de São Paulo
-    agora_local = datetime.now(TZ_SAO_PAULO)
-    inicio_dia_local = agora_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    fim_dia_local = inicio_dia_local + timedelta(days=1)
+def buscar_agendamentos_por_data(data_selecionada: date):
+    """Busca todos os agendamentos confirmados para uma data específica (fuso de São Paulo)."""
+    # Define o início e o fim do dia selecionado no fuso de São Paulo
+    inicio_dia_local = datetime.combine(data_selecionada, time.min).replace(tzinfo=TZ_SAO_PAULO)
+    fim_dia_local = datetime.combine(data_selecionada, time.max).replace(tzinfo=TZ_SAO_PAULO)
     
     # Converte os limites para UTC para consultar o banco de dados
     inicio_dia_utc = inicio_dia_local.astimezone(timezone.utc)
@@ -86,9 +80,8 @@ def get_relatorio_no_show() -> pd.DataFrame:
     df = buscar_todos_agendamentos()
     if df.empty: return pd.DataFrame()
     
-    hoje_local = date.today()
+    hoje_local = datetime.now(TZ_SAO_PAULO).date()
     df['horario_date'] = df['horario'].dt.date
-    # Considera apenas agendamentos que já passaram
     df_passado = df[df['horario_date'] <= hoje_local].copy()
 
     if df_passado.empty: return pd.DataFrame()
