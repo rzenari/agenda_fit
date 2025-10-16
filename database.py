@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL COM PADRONIZAÇÃO DE PIN PARA STRING)
+# database.py (VERSÃO FINAL COM CORREÇÃO DE FUSO HORÁRIO)
 
 import streamlit as st
 import pandas as pd
@@ -6,6 +6,10 @@ from datetime import datetime, time, date, timedelta
 import json
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+import pytz # Importa a biblioteca de fuso horário
+
+# Define o fuso horário padrão para São Paulo
+TZ_SAO_PAULO = pytz.timezone('America/Sao_Paulo')
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
@@ -25,13 +29,18 @@ COLECAO_AGENDAMENTOS = "agendamentos"
 # --- Funções de Operação no Banco de Dados (NoSQL) ---
 
 def salvar_agendamento(dados: dict, pin_code: str):
-    """Cria um novo documento no Firestore, garantindo que o PIN seja sempre salvo como string."""
+    """Cria um novo documento no Firestore, garantindo que o PIN seja string e o horário seja UTC."""
+    
+    # Converte o horário localizado para UTC para salvar no banco
+    horario_local = dados['horario']
+    horario_utc = horario_local.astimezone(pytz.utc)
+
     data_para_salvar = {
-        'pin_code': str(pin_code),  # PADRONIZADO: Garante que o PIN é sempre salvo como texto.
+        'pin_code': str(pin_code),
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': dados['horario'],  
+        'horario': horario_utc,  # SALVA EM UTC
         'status': "Confirmado",
         'is_pacote_sessao': False 
     }
@@ -41,64 +50,50 @@ def salvar_agendamento(dados: dict, pin_code: str):
     except Exception as e:
         return f"Erro de DB: {e}"
 
-def buscar_agendamento_por_pin(pin_code: str):
-    """
-    Busca um agendamento pelo PIN. A busca é feita apenas por STRING,
-    pois o salvamento foi padronizado.
-    """
-    print(f"--- [DEBUG DB] Iniciando busca por PIN (string): '{pin_code}' ---")
+def processar_retorno_firestore(doc):
+    """Função auxiliar para converter o timestamp UTC do Firestore para o horário local de SP."""
+    data = doc.to_dict()
+    data['id'] = doc.id 
+    if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
+        horario_utc = data['horario'].to_datetime().replace(tzinfo=pytz.utc)
+        # Converte para o fuso de São Paulo para exibição
+        data['horario'] = horario_utc.astimezone(TZ_SAO_PAULO)
+    return data
 
+def buscar_agendamento_por_pin(pin_code: str):
+    """Busca um agendamento pelo PIN (string) e converte o horário para o fuso local."""
     try:
-        # Busca única e direta por STRING, que agora é o padrão.
         query = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1)
         docs = query.get()
         
         if docs:
-            print(f"--- [DEBUG DB] SUCESSO! Documento encontrado: {docs[0].id} ---")
-            doc = docs[0]
-            data = doc.to_dict()
-            data['id'] = doc.id 
-            if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
-                data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
-            return data
+            return processar_retorno_firestore(docs[0])
         else:
-            print(f"--- [DEBUG DB] FALHA: Nenhum documento encontrado para o PIN: '{pin_code}' ---")
             return None
             
     except Exception as e:
-        print(f"--- [DEBUG DB] ERRO CRÍTICO DURANTE A EXECUÇÃO DA QUERY: {e} ---")
+        print(f"ERRO CRÍTICO NA BUSCA POR PIN: {e}")
         return None
 
 def buscar_todos_agendamentos():
     try:
         docs = db.collection(COLECAO_AGENDAMENTOS).stream()
-        data = []
-        for doc in docs:
-            item = doc.to_dict()
-            item['id'] = doc.id
-            if 'horario' in item and hasattr(item['horario'], 'to_datetime'):
-                item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
-            data.append(item)
+        data = [processar_retorno_firestore(doc) for doc in docs]
         if not data: return pd.DataFrame()
         return pd.DataFrame(data).sort_values(by='horario')
     except Exception as e:
         print(f"ERRO NA BUSCA TOTAL: {e}")
         return pd.DataFrame()
 
-def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
+def buscar_agendamentos_por_intervalo(start_dt_utc: datetime, end_dt_utc: datetime):
+    """Busca agendamentos por um intervalo de data/hora em UTC."""
     try:
         query = db.collection(COLECAO_AGENDAMENTOS) \
-            .where(filter=FieldFilter('horario', '>=', start_dt)) \
-            .where(filter=FieldFilter('horario', '<', end_dt)) \
+            .where(filter=FieldFilter('horario', '>=', start_dt_utc)) \
+            .where(filter=FieldFilter('horario', '<', end_dt_utc)) \
             .order_by('horario')
         docs = query.stream()
-        data = []
-        for doc in docs:
-            item = doc.to_dict()
-            item['id'] = doc.id
-            if 'horario' in item and hasattr(item['horario'], 'to_datetime'):
-                item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
-            data.append(item)
+        data = [processar_retorno_firestore(doc) for doc in docs]
         return pd.DataFrame(data)
     except Exception as e:
         print(f"ERRO NA BUSCA POR INTERVALO: {e}")
@@ -117,11 +112,7 @@ def buscar_agendamento_por_id(id_agendamento: str):
     try:
         doc = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento).get()
         if doc.exists:
-            data = doc.to_dict()
-            data['id'] = doc.id
-            if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
-                data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
-            return data
+            return processar_retorno_firestore(doc)
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
