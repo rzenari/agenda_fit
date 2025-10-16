@@ -91,7 +91,6 @@ def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
         print(f"ERRO AO ATUALIZAR STATUS: {e}")
         return False
 
-# ... (outras funções como buscar_todos_agendamentos e buscar_agendamento_por_id, se necessárias)
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos e converte para o fuso local."""
     try:
@@ -102,4 +101,14 @@ def buscar_todos_agendamentos():
     except Exception as e:
         print(f"ERRO NA BUSCA TOTAL: {e}")
         return pd.DataFrame()
+
+def buscar_agendamento_por_id(id_agendamento: str):
+    """Busca um agendamento pelo ID do documento e converte o horário para o fuso local."""
+    try:
+        doc = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento).get()
+        if doc.exists:
+            return processar_retorno_firestore(doc)
+    except Exception as e:
+        print(f"ERRO NA BUSCA POR ID: {e}")
+    return None
 
