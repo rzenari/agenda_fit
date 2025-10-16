@@ -1,16 +1,18 @@
-# database.py (VERSÃO FINAL com Firestore SEM Cache nos Dados)
+# database.py (VERSÃO FINAL com Busca por Intervalo Firestore)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta # Adicionado timedelta
 import json 
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter # Importação para filtros de data
 
-# --- Inicialização da Conexão (Chave única) ---
-# O cache nesta função é OBRIGATÓRIO para evitar recriar a conexão do cliente a cada rerun
+# --- Inicialização da Conexão ---
 @st.cache_resource
 def get_firestore_client():
-    """Inicializa o cliente Firestore lendo a Service Account."""
+    """
+    Inicializa o cliente Firestore lendo a Service Account.
+    """
     try:
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
@@ -65,7 +67,6 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
         return None
 
-# NENHUM DECORADOR DE CACHE AQUI PARA GARANTIR DADOS FRESCOS
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos e retorna um DataFrame."""
     try:
@@ -81,6 +82,36 @@ def buscar_todos_agendamentos():
         return pd.DataFrame(data).sort_values(by='horario')
     except Exception as e:
         print(f"ERRO NA BUSCA TOTAL: {e}")
+        return pd.DataFrame()
+
+
+def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
+    """
+    Busca agendamentos por um intervalo de data/hora no Firestore.
+    RESOLVE O PROBLEMA DA "AGENDA DE HOJE"
+    """
+    try:
+        # A API do Firestore exige que as datas sejam enviadas com fuso (timestamp)
+        # O Python envia o datetime, o Firestore o converte internamente.
+        
+        docs = db.collection(COLECAO_AGENDAMENTOS).where(
+            filter=FieldFilter('horario', '>=', start_dt)
+        ).where(
+            filter=FieldFilter('horario', '<', end_dt)
+        ).order_by('horario').stream()
+        
+        data = []
+        for doc in docs:
+            item = doc.to_dict()
+            item['id'] = doc.id
+            if 'horario' in item:
+                # Converte o timestamp para datetime Python Naive (sem fuso)
+                item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
+            data.append(item)
+            
+        return pd.DataFrame(data)
+    except Exception as e:
+        print(f"ERRO NA BUSCA POR INTERVALO: {e}")
         return pd.DataFrame()
 
 
