@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
+# database.py (VERSÃO COM CORREÇÃO DE ÍNDICE E KEYERROR)
 
 import streamlit as st
 import pandas as pd
@@ -45,7 +45,6 @@ def processar_retorno_firestore(doc):
     data = doc.to_dict()
     data['id'] = doc.id
     if 'horario' in data and isinstance(data['horario'], datetime):
-        # Garante que o horário do Firestore seja tratado como UTC e convertido para São Paulo
         horario_utc = data['horario'].replace(tzinfo=timezone.utc)
         data['horario'] = horario_utc.astimezone(TZ_SAO_PAULO)
     return data
@@ -62,10 +61,12 @@ def buscar_agendamento_por_pin(pin_code: str):
         return None
 
 def buscar_agendamentos_por_intervalo(start_dt_utc: datetime, end_dt_utc: datetime):
-    """Busca agendamentos confirmados em um intervalo de tempo."""
+    """
+    Busca agendamentos em um intervalo de tempo.
+    Removemos o filtro de 'status' para evitar a necessidade de um índice composto no Firestore.
+    """
     try:
         query = db.collection(COLECAO_AGENDAMENTOS) \
-            .where(filter=FieldFilter('status', '==', 'Confirmado')) \
             .where(filter=FieldFilter('horario', '>=', start_dt_utc)) \
             .where(filter=FieldFilter('horario', '<', end_dt_utc)) \
             .order_by('horario')
