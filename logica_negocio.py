@@ -1,6 +1,6 @@
 # logica_negocio.py (VERSÃO COM LÓGICA DE REMARCAÇÃO)
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import pandas as pd
 import random
 from zoneinfo import ZoneInfo
@@ -45,7 +45,7 @@ def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
     status_map = {"cancelar": "Cancelado (Admin)", "finalizar": "Finalizado", "no-show": "No-Show"}
     return atualizar_status_agendamento(agendamento_id, status_map[acao]) if acao in status_map else False
 
-def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: datetime) -> (bool, str):
+def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: datetime) -> tuple[bool, str]:
     """Processa a lógica de remarcação de um agendamento."""
     agendamento_atual = buscar_agendamento_por_pin(pin)
     if not agendamento_atual:
@@ -53,7 +53,9 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
 
     profissional = agendamento_atual['profissional']
     
-    # Verifica se o novo horário está disponível, ignorando o agendamento atual
+    if novo_horario_local < datetime.now(TZ_SAO_PAULO):
+        return False, "Não é possível agendar para uma data ou hora no passado."
+
     if not horario_esta_disponivel(profissional, novo_horario_local, id_ignorada=agendamento_id):
         return False, "O novo horário escolhido já está ocupado."
 
@@ -72,7 +74,26 @@ def buscar_agendamentos_hoje():
     
     return pd.DataFrame(buscar_agendamentos_por_intervalo(inicio_dia_utc, fim_dia_utc))
 
-def get_relatorio_no_show():
-    # A lógica de relatório pode ser expandida aqui
-    return pd.DataFrame()
+def get_relatorio_no_show() -> pd.DataFrame:
+    df = buscar_todos_agendamentos()
+    if df.empty: return pd.DataFrame()
+    
+    hoje_local = date.today()
+    df['horario_date'] = df['horario'].dt.date
+    df_passado = df[df['horario_date'] <= hoje_local].copy()
+
+    if df_passado.empty: return pd.DataFrame()
+
+    df_grouped = df_passado.groupby('profissional').agg(
+        total_sessoes=('status', 'size'),
+        faltas=('status', lambda x: (x == 'No-Show').sum()),
+        cancelados=('status', lambda x: (x.str.contains('Cancelado', na=False)).sum()),
+        finalizados=('status', lambda x: (x == 'Finalizado').sum())
+    ).reset_index()
+
+    if 'total_sessoes' in df_grouped.columns and 'faltas' in df_grouped.columns:
+        df_grouped['taxa_no_show_%'] = (
+            df_grouped['faltas'] / df_grouped['total_sessoes'].replace(0, 1) * 100
+        ).round(2)
+    return df_grouped
 
