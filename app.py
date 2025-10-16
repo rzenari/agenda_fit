@@ -1,3 +1,5 @@
+# app.py (VERSÃO FINAL PARA FIRESTORE - SEM ALTERAÇÕES NA LÓGICA DE VISUALIZAÇÃO)
+
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
@@ -33,6 +35,7 @@ if pin_param:
 # Inicialização do Session State para persistir a mensagem
 if 'last_agendamento_info' not in st.session_state:
     st.session_state.last_agendamento_info = None
+
 
 # --- FUNÇÃO DE SALVAMENTO (Callback) ---
 def handle_agendamento_submission():
@@ -84,12 +87,12 @@ def handle_agendamento_submission():
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
 
     # 4. Dispara o Rerun para que a mensagem persistida apareça no topo
-    st.rerun() # <-- CORREÇÃO: Usando a função oficial
+    st.rerun()
     
 
 
 # --- FUNÇÃO DE AÇÃO GLOBAL (BOTÕES) ---
-def handle_admin_action(id_agendamento, acao):
+def handle_admin_action(id_agendamento: str, acao):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada para o agendamento ID {id_agendamento}!")
         st.rerun()
@@ -168,15 +171,11 @@ def render_backoffice_admin():
             elif info['status'] is not None:
                 # EXIBE O ERRO DETALHADO DO DB AQUI
                 st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
-            
-            # Limpa o estado depois de exibir
-            st.session_state.last_agendamento_info = None
-
+                
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                # Adiciona 'key's para capturar os valores no Session State
                 st.text_input("Nome do Cliente:", key="c_nome_input")
                 st.text_input("Telefone (para link gestão):", key="c_tel_input")
             with col2:
