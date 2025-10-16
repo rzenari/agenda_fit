@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM DEBUG MELHORADO E AVISO DE CACHE)
+# app.py (VERSÃO FINAL SEM DEBUG NA TELA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -41,14 +41,12 @@ if 'last_agendamento_info' not in st.session_state:
 def handle_agendamento_submission():
     """Lógica de submissão do formulário, chamada no on_click."""
     
-    # 1. Recupera os valores do Session State (criados pelo formulário)
     cliente = st.session_state.c_nome_input
     telefone = st.session_state.c_tel_input
     profissional = st.session_state.c_prof_input
     data_consulta = st.session_state.c_data_input
     hora_consulta = st.session_state.c_hora_input
 
-    # Limpa a última mensagem de status
     st.session_state.last_agendamento_info = None
 
     if not cliente:
@@ -58,19 +56,16 @@ def handle_agendamento_submission():
 
     dt_consulta = datetime.combine(data_consulta, hora_consulta)
     
-    # 2. Checagem de disponibilidade
     if horario_esta_disponivel(profissional, dt_consulta):
         pin_code = gerar_token_unico() 
         dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
         
-        # 3. Salva no DB e captura o retorno
         resultado = salvar_agendamento(dados, pin_code)
         
         if resultado is True:
             link_base = "https://agendafit.streamlit.app"
             link_gestao = f"{link_base}?pin={pin_code}" 
             
-            # ARMAZENA O SUCESSO
             st.session_state.last_agendamento_info = {
                 'cliente': cliente,
                 'pin_code': pin_code,
@@ -78,23 +73,19 @@ def handle_agendamento_submission():
                 'status': True 
             }
             
-            # 5. LIMPEZA DOS CAMPOS APÓS O SUCESSO (CORREÇÃO)
             st.session_state.c_nome_input = ""
             st.session_state.c_tel_input = ""
             st.session_state.c_data_input = datetime.today().date()
             st.session_state.c_hora_input = time(9, 0)
             
         else:
-            # Erro do DB
             st.session_state.last_agendamento_info = {
                 'cliente': cliente,
                 'status': str(resultado)
             }
-
     else:
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
 
-    # 4. Dispara o Rerun para que a mensagem persistida apareça no topo
     st.rerun()
 
 
@@ -115,22 +106,11 @@ def render_agendamento_seguro():
     
     pin = st.query_params.get("pin", [None])[0]
 
-    # --- DEBUG INSERIDO AQUI ---
-    st.divider()
-    with st.expander("Informações de Debug (Apenas para Teste)", expanded=True):
-        st.warning("Se você acabou de atualizar o código, talvez precise limpar o cache. No menu (☰) no canto superior direito, clique em 'Clear cache' e recarregue a página.")
-        st.write(f"**1. PIN lido da URL:** `{pin}` (Tipo: `{type(pin)}`)")
+    if not pin:
+        st.error("Link inválido. Acesse pelo link exclusivo enviado.")
+        return
 
-        if not pin:
-            st.error("Nenhum PIN encontrado na URL. Acesse pelo link exclusivo enviado.")
-            return
-
-        # Busca o agendamento no DB
-        agendamento = buscar_agendamento_por_pin(pin)
-
-        st.write("**2. Resultado da busca no Banco de Dados:**")
-        st.json(agendamento if agendamento else {"status": "Nenhum agendamento encontrado com este PIN."})
-    st.divider()
+    agendamento = buscar_agendamento_por_pin(pin)
     
     if agendamento and agendamento['status'] == "Confirmado":
         st.info(f"Seu agendamento com {agendamento['profissional']} está CONFIRMADO para:")
@@ -144,6 +124,8 @@ def render_agendamento_seguro():
                 if processar_cancelamento_seguro(pin):
                     st.success("Agendamento cancelado com sucesso. O horário foi liberado para outro cliente.")
                     st.toast("Consulta cancelada!")
+                    # Limpa o parâmetro da URL para evitar re-cancelamento no refresh
+                    st.query_params.clear()
                     st.rerun() 
                 else:
                     st.error("Erro ao cancelar. Tente novamente ou contate o profissional.")
@@ -160,9 +142,8 @@ def render_agendamento_seguro():
 def render_backoffice_admin():
     """Renderiza a tela de gestão do profissional (Módulo II - Admin)."""
     
-    # --- Login ---
     st.sidebar.header("Login (Admin)")
-    senha = st.sidebar.text_input("Senha", type="password")
+    senha = st.sidebar.text_input("Senha", type="password", key="admin_password")
     
     if senha != "1234":
         st.warning("Acesso restrito ao profissional. Senha de teste: 1234")
@@ -171,10 +152,8 @@ def render_backoffice_admin():
 
     st.sidebar.success("Login como Administrador")
 
-    # --- Navegação do Admin ---
     tab1, tab2, tab3 = st.tabs(["Agenda Hoje/Manual", "Relatórios e Faltas", "Configuração (Pacotes)"])
 
-    # --- TAB 1: Agendamento Manual e Agenda do Dia ---
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
@@ -184,17 +163,10 @@ def render_backoffice_admin():
             if info.get('status') is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{info['link_gestao']}`")
-            elif "Erro de DB" in info.get('status', ''):
-                st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             elif info.get('status') is not None:
                 st.error(f"Problema no Agendamento para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             
             st.session_state.last_agendamento_info = None
-        
-        if 'c_nome_input' not in st.session_state: st.session_state.c_nome_input = ""
-        if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
-        if 'c_data_input' not in st.session_state: st.session_state.c_data_input = datetime.today().date()
-        if 'c_hora_input' not in st.session_state: st.session_state.c_hora_input = time(9, 0)
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
@@ -221,13 +193,13 @@ def render_backoffice_admin():
             st.markdown("---")
             st.write("**Ações Administrativas:**")
 
-            for index, row in df_agenda.iterrows():
-                col_id, col_cliente, col_finalizar, col_no_show, col_cancelar = st.columns([0.5, 1.5, 1, 1, 1])
-                with col_id: st.caption(f"ID: {row['id']}") 
-                with col_cliente: st.write(f"**{row['cliente']}**")
-                with col_finalizar: st.button("✅ Concluída", key=f"finish_{row['id']}", on_click=handle_admin_action, args=(row['id'], "finalizar"), type="primary", use_container_width=True)
-                with col_no_show: st.button("🚫 Falta", key=f"noshow_{row['id']}", on_click=handle_admin_action, args=(row['id'], "no-show"), use_container_width=True)
-                with col_cancelar: st.button("❌ Cancelar", key=f"cancel_{row['id']}", on_click=handle_admin_action, args=(row['id'], "cancelar"), use_container_width=True)
+            for _, row in df_agenda.iterrows():
+                cols = st.columns([0.4, 1.5, 1, 1, 1])
+                cols[0].caption(f"ID: {row['id']}") 
+                cols[1].write(f"**{row['cliente']}**")
+                cols[2].button("✅ Concluída", key=f"finish_{row['id']}", on_click=handle_admin_action, args=(row['id'], "finalizar"), type="primary", use_container_width=True)
+                cols[3].button("🚫 Falta", key=f"noshow_{row['id']}", on_click=handle_admin_action, args=(row['id'], "no-show"), use_container_width=True)
+                cols[4].button("❌ Cancelar", key=f"cancel_{row['id']}", on_click=handle_admin_action, args=(row['id'], "cancelar"), use_container_width=True)
                 st.markdown("---", unsafe_allow_html=True) 
 
         else:
@@ -252,11 +224,6 @@ def render_backoffice_admin():
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
         st.warning("Funcionalidades avançadas em desenvolvimento.")
-        st.markdown("""
-        **Otimizador de Pacotes:**
-        1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
-        2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
-        """)
 
 # --- RENDERIZAÇÃO PRINCIPAL ---
 if pin_param:
