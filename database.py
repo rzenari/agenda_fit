@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM FILTRO DE STATUS E REVISÃO DE FUSO HORÁRIO)
+# database.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
 
 import streamlit as st
 import pandas as pd
@@ -8,7 +8,6 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from zoneinfo import ZoneInfo
 
-# Define o fuso horário padrão para toda a camada de dados
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 
 @st.cache_resource
@@ -26,14 +25,13 @@ COLECAO_AGENDAMENTOS = "agendamentos"
 
 def salvar_agendamento(dados: dict, pin_code: str):
     """Salva um novo agendamento, convertendo o horário local para UTC."""
-    # Garante que o horário local seja convertido para UTC antes de salvar
     horario_utc = dados['horario'].astimezone(timezone.utc)
     data_para_salvar = {
         'pin_code': str(pin_code),
         'profissional': dados['profissional'],
         'cliente': dados['cliente'],
         'telefone': dados['telefone'],
-        'horario': horario_utc, # Salva em UTC
+        'horario': horario_utc,
         'status': "Confirmado",
     }
     try:
@@ -46,9 +44,9 @@ def processar_retorno_firestore(doc):
     """Converte um documento do Firestore para um dicionário, ajustando o fuso horário."""
     data = doc.to_dict()
     data['id'] = doc.id
-    if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
-        # Converte o horário UTC do banco de dados para o horário local de São Paulo
-        horario_utc = data['horario'].to_datetime().replace(tzinfo=timezone.utc)
+    if 'horario' in data and isinstance(data['horario'], datetime):
+        # Garante que o horário do Firestore seja tratado como UTC e convertido para São Paulo
+        horario_utc = data['horario'].replace(tzinfo=timezone.utc)
         data['horario'] = horario_utc.astimezone(TZ_SAO_PAULO)
     return data
 
@@ -88,7 +86,6 @@ def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
 def atualizar_horario_agendamento(id_agendamento: str, novo_horario_local: datetime):
     """Atualiza o horário de um agendamento, convertendo o horário local para UTC."""
     try:
-        # Garante que o novo horário local seja convertido para UTC antes de salvar
         novo_horario_utc = novo_horario_local.astimezone(timezone.utc)
         doc_ref = db.collection(COLECAO_AGENDAMENTOS).document(id_agendamento)
         doc_ref.update({'horario': novo_horario_utc})
