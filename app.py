@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM ZONEINFO E DEBUG DE PIN)
+# app.py (VERSÃO COM LEITURA DE PIN CORRIGIDA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -29,9 +29,8 @@ if db_client is None:
 
 
 # --- ROTEAMENTO E PARÂMETROS ---
-pin_param = st.query_params.get("pin", [None])[0]
-if pin_param:
-    pin_param = str(pin_param)
+# A leitura do PIN agora é feita dentro da função de renderização para maior robustez
+pin_param = st.query_params.get("pin")
 
 
 # Inicialização do Session State para persistir a mensagem
@@ -106,21 +105,25 @@ def render_agendamento_seguro():
     """Renderiza a tela de cancelamento/remarcação via PIN."""
     st.title("🔒 Gestão do seu Agendamento")
 
-    pin = st.query_params.get("pin", [None])[0]
+    # MÉTODO DE LEITURA DE PIN MAIS ROBUSTO
+    pin_values = st.query_params.get_all("pin")
+    pin = pin_values[0] if pin_values else None
+
 
     # --- SEÇÃO DE DEBUG ---
     with st.expander("Informações de Debug (Clique para ver)"):
-        st.write(f"**PIN lido da URL:** `{pin}` (Tipo: `{type(pin)}`)")
+        st.write("Dicionário completo de `query_params`:", st.query_params)
+        st.write(f"Lista de valores para a chave 'pin': `{pin_values}`")
+        st.write(f"**PIN final lido da URL:** `{pin}` (Tipo: `{type(pin)}`)")
         agendamento_debug = buscar_agendamento_por_pin(pin)
         st.write("**Resultado da busca no Banco de Dados:**")
         st.json(agendamento_debug if agendamento_debug else {"status": "Nenhum agendamento encontrado com este PIN."})
     # --- FIM DA SEÇÃO DE DEBUG ---
 
     if not pin:
-        st.error("Link inválido. Acesse pelo link exclusivo enviado.")
+        st.error("Link inválido ou PIN não fornecido na URL.")
         return
 
-    # A busca real é feita aqui novamente para popular a tela
     agendamento = buscar_agendamento_por_pin(pin)
 
     if agendamento and agendamento['status'] == "Confirmado":
