@@ -1,4 +1,4 @@
-# app.py (VERSÃO FINAL COM LIMPEZA DE FORMULÁRIO E RESTAURAÇÃO DO FILTRO)
+# app.py (VERSÃO COM DEBUG PARA O PROBLEMA DO PIN)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -114,13 +114,23 @@ def render_agendamento_seguro():
     st.title("🔒 Gestão do seu Agendamento")
     
     pin = st.query_params.get("pin", [None])[0]
-    
+
+    # --- DEBUG INSERIDO AQUI ---
+    st.divider()
+    st.subheader("Informações de Debug (Apenas para Teste)")
+    st.write(f"**1. PIN lido da URL:** `{pin}`")
+
     if not pin:
         st.error("Link inválido. Acesse pelo link exclusivo enviado.")
         return
 
     # Busca o agendamento no DB
     agendamento = buscar_agendamento_por_pin(pin)
+
+    # --- DEBUG INSERIDO AQUI ---
+    st.write("**2. Resultado da busca no Banco de Dados:**")
+    st.json(agendamento if agendamento else {"status": "Nenhum agendamento encontrado com este PIN."})
+    st.divider()
     
     if agendamento and agendamento['status'] == "Confirmado":
         st.info(f"Seu agendamento com {agendamento['profissional']} está CONFIRMADO para:")
@@ -168,11 +178,10 @@ def render_backoffice_admin():
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
-        # EXIBIÇÃO ROBUSTA DA MENSAGEM DE SUCESSO/ERRO
         if st.session_state.last_agendamento_info:
             info = st.session_state.last_agendamento_info
             
-            if info['status'] is True:
+            if info.get('status') is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{info['link_gestao']}`")
             elif "Erro de DB" in info.get('status', ''):
@@ -182,20 +191,14 @@ def render_backoffice_admin():
             
             st.session_state.last_agendamento_info = None
         
-        # GARANTE QUE OS CAMPOS ESTEJAM LIMPOS SE NÃO HOUVER VALOR NO SESSION STATE
-        if 'c_nome_input' not in st.session_state:
-            st.session_state.c_nome_input = ""
-        if 'c_tel_input' not in st.session_state:
-            st.session_state.c_tel_input = ""
-        if 'c_data_input' not in st.session_state:
-            st.session_state.c_data_input = datetime.today().date()
-        if 'c_hora_input' not in st.session_state:
-            st.session_state.c_hora_input = time(9, 0)
+        if 'c_nome_input' not in st.session_state: st.session_state.c_nome_input = ""
+        if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
+        if 'c_data_input' not in st.session_state: st.session_state.c_data_input = datetime.today().date()
+        if 'c_hora_input' not in st.session_state: st.session_state.c_hora_input = time(9, 0)
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                # Usa o valor do session state para controlar o campo
                 st.text_input("Nome do Cliente:", key="c_nome_input")
                 st.text_input("Telefone (para link gestão):", key="c_tel_input")
             with col2:
@@ -203,94 +206,45 @@ def render_backoffice_admin():
                 st.date_input("Data:", key="c_data_input") 
             with col3:
                 st.time_input("Hora:", step=timedelta(minutes=30), key="c_hora_input")
-                
-                # CHAMA O CALLBACK: A lógica de salvamento agora está na função
-                submitted = st.form_submit_button(
-                    "AGENDAR NOVA SESSÃO", 
-                    type="primary",
-                    on_click=handle_agendamento_submission
-                )
+                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
 
-        
         st.subheader("Agenda de Hoje")
         agenda_hoje = buscar_agendamentos_hoje()
         
         if not agenda_hoje.empty:
             df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status', 'id']].copy()
-            
-            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas para DD/MM/AAAA
             df_agenda['Data'] = df_agenda['horario'].dt.strftime('%d/%m/%Y')
             df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
 
-            # --- GESTÃO DA AGENDA: BOTÕES DE AÇÃO ---
-            st.dataframe(
-                df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status']],
-                use_container_width=True, 
-                hide_index=True,
-            )
+            st.dataframe(df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status']], use_container_width=True, hide_index=True)
             
             st.markdown("---")
             st.write("**Ações Administrativas:**")
 
-            # Renderiza os botões de ação abaixo do DataFrame
             for index, row in df_agenda.iterrows():
                 col_id, col_cliente, col_finalizar, col_no_show, col_cancelar = st.columns([0.5, 1.5, 1, 1, 1])
-                
-                with col_id:
-                    st.caption(f"ID: {row['id']}") 
-                with col_cliente:
-                    st.write(f"**{row['cliente']}**")
-
-                with col_finalizar:
-                    st.button("✅ Concluída",
-                                     key=f"finish_{row['id']}",
-                                     on_click=handle_admin_action, 
-                                     args=(row['id'], "finalizar"),
-                                     type="primary", use_container_width=True)
-                
-                with col_no_show:
-                    st.button("🚫 Falta", 
-                                     key=f"noshow_{row['id']}", 
-                                     on_click=handle_admin_action, 
-                                     args=(row['id'], "no-show"), use_container_width=True)
-
-                with col_cancelar:
-                    st.button("❌ Cancelar", 
-                                     key=f"cancel_{row['id']}", 
-                                     on_click=handle_admin_action, 
-                                     args=(row['id'], "cancelar"), use_container_width=True)
-
+                with col_id: st.caption(f"ID: {row['id']}") 
+                with col_cliente: st.write(f"**{row['cliente']}**")
+                with col_finalizar: st.button("✅ Concluída", key=f"finish_{row['id']}", on_click=handle_admin_action, args=(row['id'], "finalizar"), type="primary", use_container_width=True)
+                with col_no_show: st.button("🚫 Falta", key=f"noshow_{row['id']}", on_click=handle_admin_action, args=(row['id'], "no-show"), use_container_width=True)
+                with col_cancelar: st.button("❌ Cancelar", key=f"cancel_{row['id']}", on_click=handle_admin_action, args=(row['id'], "cancelar"), use_container_width=True)
                 st.markdown("---", unsafe_allow_html=True) 
 
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
 
-
-    # --- TAB 2 e TAB 3 (sem alterações) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
-        
         df_relatorio = get_relatorio_no_show()
-        
         if not df_relatorio.empty:
             st.subheader("Taxa de No-Show Média vs. Profissional")
-            
             total_atendimentos = df_relatorio['total_atendimentos'].sum()
             total_faltas = df_relatorio['total_faltas'].sum()
             taxa_media = (total_faltas / total_atendimentos) * 100 if total_atendimentos > 0 else 0
-
             col1, col2 = st.columns(2)
             col1.metric("Taxa Média de No-Show", f"{taxa_media:.2f}%")
             col2.metric("Total de Sessões Ocorridas/Faltadas", int(total_atendimentos))
-
-            st.dataframe(df_relatorio.rename(columns={
-                'total_atendimentos': 'Total Sessões', 
-                'total_faltas': 'Faltas', 
-                'total_cancelados': 'Cancelados',
-                'total_finalizados': 'Finalizados',
-                'Taxa No-Show (%)': 'Taxa Falta (%)'
-            }), use_container_width=True, hide_index=True)
-
+            st.dataframe(df_relatorio.rename(columns={'total_atendimentos': 'Total Sessões', 'total_faltas': 'Faltas', 'total_cancelados': 'Cancelados', 'total_finalizados': 'Finalizados', 'Taxa No-Show (%)': 'Taxa Falta (%)'}), use_container_width=True, hide_index=True)
             st.bar_chart(df_relatorio.set_index('profissional')['Taxa No-Show (%)'])
         else:
             st.info("Ainda não há dados suficientes de sessões para gerar relatórios.")
@@ -304,10 +258,9 @@ def render_backoffice_admin():
         2.  Disparar alertas automáticos (Notificações) para renovação na 9ª sessão.
         """)
 
-
 # --- RENDERIZAÇÃO PRINCIPAL ---
-
 if pin_param:
     render_agendamento_seguro()
 else:
     render_backoffice_admin()
+
