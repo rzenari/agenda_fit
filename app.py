@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM FILTRO DE STATUS E REVISÃO DE FUSO HORÁRIO)
+# app.py (VERSÃO COM FORMULÁRIO DE CADASTRO RESTAURADO)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -163,7 +163,7 @@ def render_agendamento_seguro():
             else:
                 st.error("Erro ao cancelar.")
         
-        if col2.button("🔄 REMARCAR HORÁrio", use_container_width=True):
+        if col2.button("🔄 REMARCAR HORÁRIO", use_container_width=True):
             st.session_state.remarcando = True
             st.rerun()
 
@@ -178,7 +178,29 @@ def render_backoffice_admin():
     tab1, tab2 = st.tabs(["Agenda e Agendamento", "Relatórios"])
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
-        # ... (código do formulário de agendamento) ...
+        
+        # --- CÓDIGO DO FORMULÁRIO RESTAURADO ---
+        if st.session_state.get('last_agendamento_info'):
+            info = st.session_state.last_agendamento_info
+            if info.get('status'):
+                st.success(f"Agendado para {info['cliente']} com sucesso!")
+                st.markdown(f"**LINK DE GESTÃO:** `{info['link_gestao']}`")
+            else:
+                st.error(f"Erro: {info['status']}")
+            st.session_state.last_agendamento_info = None
+
+        with st.form("admin_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.text_input("Nome do Cliente:", key="c_nome_input")
+                st.text_input("Telefone:", key="c_tel_input")
+            with col2:
+                st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
+                st.date_input("Data:", key="c_data_input", min_value=date.today())
+            with col3:
+                st.time_input("Hora:", key="c_hora_input", step=timedelta(minutes=30))
+                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
+        # --- FIM DO CÓDIGO RESTAURADO ---
 
         st.subheader("🗓️ Agenda de Hoje (Apenas Confirmados)")
         agenda_hoje = buscar_agendamentos_hoje()
@@ -203,6 +225,7 @@ def render_backoffice_admin():
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
             st.info("Nenhuma consulta confirmada para hoje.")
+            
     with tab2:
         st.header("📈 Relatórios de Faltas (No-Show)")
         df_relatorio = get_relatorio_no_show()
