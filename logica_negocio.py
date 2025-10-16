@@ -23,6 +23,9 @@ def horario_esta_disponivel(profissional: str, data_hora_local: datetime, id_ign
     if df.empty:
         return True
     
+    # Garante que a coluna de horário no DataFrame está no mesmo fuso horário para comparação
+    df['horario'] = df['horario'].dt.tz_convert(TZ_SAO_PAULO)
+
     conflitos = df[
         (df['profissional'] == profissional) &
         (df['horario'] == data_hora_local) &
