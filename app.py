@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM DEBUG PARA O PROBLEMA DO PIN)
+# app.py (VERSÃO COM DEBUG MELHORADO E AVISO DE CACHE)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -117,19 +117,19 @@ def render_agendamento_seguro():
 
     # --- DEBUG INSERIDO AQUI ---
     st.divider()
-    st.subheader("Informações de Debug (Apenas para Teste)")
-    st.write(f"**1. PIN lido da URL:** `{pin}`")
+    with st.expander("Informações de Debug (Apenas para Teste)", expanded=True):
+        st.warning("Se você acabou de atualizar o código, talvez precise limpar o cache. No menu (☰) no canto superior direito, clique em 'Clear cache' e recarregue a página.")
+        st.write(f"**1. PIN lido da URL:** `{pin}` (Tipo: `{type(pin)}`)")
 
-    if not pin:
-        st.error("Link inválido. Acesse pelo link exclusivo enviado.")
-        return
+        if not pin:
+            st.error("Nenhum PIN encontrado na URL. Acesse pelo link exclusivo enviado.")
+            return
 
-    # Busca o agendamento no DB
-    agendamento = buscar_agendamento_por_pin(pin)
+        # Busca o agendamento no DB
+        agendamento = buscar_agendamento_por_pin(pin)
 
-    # --- DEBUG INSERIDO AQUI ---
-    st.write("**2. Resultado da busca no Banco de Dados:**")
-    st.json(agendamento if agendamento else {"status": "Nenhum agendamento encontrado com este PIN."})
+        st.write("**2. Resultado da busca no Banco de Dados:**")
+        st.json(agendamento if agendamento else {"status": "Nenhum agendamento encontrado com este PIN."})
     st.divider()
     
     if agendamento and agendamento['status'] == "Confirmado":
