@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM CORREÇÃO DE ÍNDICE E KEYERROR)
+# app.py (VERSÃO COM CORREÇÃO NA EXIBIÇÃO DE ERRO DE REMARCAÇÃO)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -38,6 +38,9 @@ if 'agendamentos_selecionados' not in st.session_state:
     st.session_state.agendamentos_selecionados = {}
 if 'data_filtro_agenda' not in st.session_state:
     st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
+# Novo estado para armazenar o status da remarcação
+if 'remarcacao_status' not in st.session_state:
+    st.session_state.remarcacao_status = None
 
 
 # --- FUNÇÕES DE CALLBACK E AÇÕES ---
@@ -70,15 +73,13 @@ def handle_agendamento_submission():
             st.session_state.data_filtro_agenda = data_consulta
             st.session_state.c_nome_input, st.session_state.c_tel_input = "", ""
         else:
-            # Garante que o nome do cliente seja passado na mensagem de erro
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
     else:
-        # Garante que o nome do cliente seja passado na mensagem de erro
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Horário já ocupado! Tente outro."}
     st.rerun()
 
 def handle_remarcar_confirmacao(pin, agendamento_id):
-    """Lida com a confirmação de uma remarcação pelo cliente."""
+    """Lida com a confirmação de uma remarcação, salvando o status no session_state."""
     nova_data = st.session_state.nova_data_remarcacao
     nova_hora = st.session_state.nova_hora_remarcacao
     
@@ -87,11 +88,13 @@ def handle_remarcar_confirmacao(pin, agendamento_id):
 
     sucesso, mensagem = processar_remarcacao(pin, agendamento_id, novo_horario_local)
 
+    # Armazena o resultado no session_state para ser exibido após o rerun
+    st.session_state.remarcacao_status = {'sucesso': sucesso, 'mensagem': mensagem}
+    
     if sucesso:
-        st.success(mensagem)
+        # Se a remarcação foi bem-sucedida, sai do modo de remarcação
         st.session_state.remarcando = False
-    else:
-        st.error(mensagem)
+    
     st.rerun()
 
 def handle_cancelar_selecionados():
@@ -123,6 +126,17 @@ def handle_admin_action(id_agendamento: str, acao: str):
 def render_agendamento_seguro():
     """Renderiza a página de gestão do cliente (acessada via PIN)."""
     st.title("🔒 Gestão do seu Agendamento")
+
+    # Exibe e limpa a mensagem de status da remarcação que está no session_state
+    if st.session_state.remarcacao_status:
+        status = st.session_state.remarcacao_status
+        if status['sucesso']:
+            st.success(status['mensagem'])
+        else:
+            st.error(status['mensagem'])
+        # Limpa a mensagem para não ser exibida novamente
+        st.session_state.remarcacao_status = None
+
     pin = st.query_params.get("pin")
 
     if not pin:
@@ -152,7 +166,8 @@ def render_agendamento_seguro():
             col2.time_input("Nova hora", key="nova_hora_remarcacao", step=timedelta(minutes=30))
             
             st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id']), use_container_width=True)
-        if st.button("Cancelar Remarcação", use_container_width=True):
+        # Botão para fechar/cancelar a visualização de remarcação
+        if st.button("⬅️ Voltar", use_container_width=True):
             st.session_state.remarcando = False
             st.rerun()
     else:
@@ -180,14 +195,11 @@ def render_backoffice_admin():
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
-        # Lógica de exibição de mensagem de status corrigida
         if st.session_state.get('last_agendamento_info'):
             info = st.session_state.last_agendamento_info
-            # Checa explicitamente se o status é True (sucesso)
             if info.get('status') is True:
                 st.success(f"Agendado para {info.get('cliente')} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}`")
-            # Se não for True, é uma mensagem de erro
             else:
                 st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
             st.session_state.last_agendamento_info = None
