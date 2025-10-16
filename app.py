@@ -1,5 +1,3 @@
-# app.py (VERSÃO FINAL PARA FIRESTORE - SEM ALTERAÇÕES NA LÓGICA DE VISUALIZAÇÃO)
-
 import streamlit as st
 from datetime import datetime, time
 import pandas as pd
@@ -37,61 +35,8 @@ if 'last_agendamento_info' not in st.session_state:
     st.session_state.last_agendamento_info = None
 
 
-# --- FUNÇÃO DE SALVAMENTO (Callback) ---
-def handle_agendamento_submission():
-    """Lógica de submissão do formulário, chamada no on_click."""
-    
-    # 1. Recupera os valores do Session State (criados pelo formulário)
-    cliente = st.session_state.c_nome_input
-    telefone = st.session_state.c_tel_input
-    profissional = st.session_state.c_prof_input
-    data_consulta = st.session_state.c_data_input
-    hora_consulta = st.session_state.c_hora_input
-
-    # Limpa a última mensagem de status
-    st.session_state.last_agendamento_info = None
-
-    if not cliente:
-        # Define a mensagem de erro no session_state para ser exibida no próximo run
-        st.session_state.last_agendamento_info = {'status': "Nome do cliente é obrigatório.", 'cliente': ''}
-        st.rerun()
-        return
-
-    dt_consulta = datetime.combine(data_consulta, hora_consulta)
-    
-    # 2. Checagem de disponibilidade
-    if horario_esta_disponivel(profissional, dt_consulta):
-        pin_code = gerar_token_unico() 
-        dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
-        
-        # 3. Salva no DB e captura o retorno
-        resultado = salvar_agendamento(dados, pin_code)
-        
-        if resultado is True:
-            link_base = f"https://agendafit.streamlit.app" 
-            link_gestao = f"{link_base}?pin={pin_code}" 
-            
-            st.session_state.last_agendamento_info = {
-                'cliente': cliente,
-                'pin_code': pin_code,
-                'link_gestao': link_gestao,
-                'status': True # Sucesso
-            }
-        else:
-            # Erro do DB
-            st.session_state.last_agendamento_info = {
-                'cliente': cliente,
-                'status': str(resultado)
-            }
-    else:
-        st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
-
-    # 4. Dispara o Rerun para que a mensagem persistida apareça no topo
-    st.rerun()
-    
-
-
-# --- FUNÇÃO DE AÇÃO GLOBAL (BOTÕES) ---
+# --- FUNÇÃO DE AÇÃO GLOBAL ---
+# Mantemos handle_admin_action, pois os botões não estão dentro de um st.form
 def handle_admin_action(id_agendamento: str, acao):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada para o agendamento ID {id_agendamento}!")
@@ -171,26 +116,61 @@ def render_backoffice_admin():
             elif info['status'] is not None:
                 # EXIBE O ERRO DETALHADO DO DB AQUI
                 st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
-                
+            
+            # Limpa o estado após exibir, exceto se for um novo envio de formulário
+            st.session_state.last_agendamento_info = None
+
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.text_input("Nome do Cliente:", key="c_nome_input")
-                st.text_input("Telefone (para link gestão):", key="c_tel_input")
+                # Usamos st.session_state para input keys
+                cliente = st.text_input("Nome do Cliente:", key="c_nome_input")
+                telefone = st.text_input("Telefone (para link gestão):", key="c_tel_input")
             with col2:
-                st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
-                st.date_input("Data:", datetime.today(), key="c_data_input")
+                profissional = st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
+                data_consulta = st.date_input("Data:", datetime.today(), key="c_data_input")
             with col3:
-                st.time_input("Hora:", time(9, 0), step=1800, key="c_hora_input")
+                hora_consulta = st.time_input("Hora:", time(9, 0), step=1800, key="c_hora_input")
                 
-                # CHAMA O CALLBACK: A lógica de salvamento agora está na função
-                submitted = st.form_submit_button(
-                    "AGENDAR NOVA SESSÃO", 
-                    type="primary",
-                    on_click=handle_agendamento_submission
-                )
+                # CORREÇÃO CRÍTICA: REMOVE on_click e usa a submissão padrão do form
+                submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary")
 
+            # LÓGICA DE SALVAMENTO DE VOLTA AO BLOCO PRINCIPAL
+            if submitted and cliente:
+                
+                dt_consulta = datetime.combine(data_consulta, hora_consulta)
+                
+                if horario_esta_disponivel(profissional, dt_consulta):
+                    pin_code = gerar_token_unico() 
+                    dados = {'profissional': profissional, 'cliente': cliente, 'telefone': telefone, 'horario': dt_consulta}
+                    
+                    # 3. Salva no DB e captura o retorno
+                    resultado = salvar_agendamento(dados, pin_code)
+                    
+                    if resultado is True:
+                        
+                        link_base = f"https://agendafit.streamlit.app" 
+                        link_gestao = f"{link_base}?pin={pin_code}" 
+                        
+                        # ARMAZENA AS INFORMAÇÕES NO SESSION STATE
+                        st.session_state.last_agendamento_info = {
+                            'cliente': cliente,
+                            'pin_code': pin_code,
+                            'link_gestao': link_gestao,
+                            'status': True # Sucesso
+                        }
+                        
+                        st.rerun() # Dispara a re-execução (que agora é válida!)
+                    else:
+                        # ERRO DO DB
+                        st.session_state.last_agendamento_info = {
+                            'cliente': cliente,
+                            'status': str(resultado)
+                        }
+                        st.rerun() # Exibe o erro no topo
+                else:
+                    st.error("Horário já ocupado! Tente outro.") # Esta mensagem é menos importante, pois o st.form faz rerun de qualquer forma.
         
         st.subheader("Agenda de Hoje")
         agenda_hoje = buscar_agendamentos_hoje()
@@ -239,7 +219,7 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
+    # --- TAB 2 e TAB 3 (omissões por brevidade) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
         
