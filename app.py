@@ -1,7 +1,5 @@
-# app.py (FINAL)
-
 import streamlit as st
-from datetime import datetime, time
+from datetime import datetime, time, date, timedelta
 import pandas as pd
 import random
 
@@ -171,7 +169,7 @@ def render_backoffice_admin():
                 # EXIBE O ERRO DETALHADO DO DB AQUI
                 st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             
-            # Limpa o estado após exibir
+            # Limpa o estado depois de exibir
             st.session_state.last_agendamento_info = None
         
         with st.form("admin_form"):
@@ -181,7 +179,7 @@ def render_backoffice_admin():
                 st.text_input("Telefone (para link gestão):", key="c_tel_input")
             with col2:
                 st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
-                st.date_input("Data:", datetime.today(), key="c_data_input")
+                st.date_input("Data:", datetime.today().date(), key="c_data_input") # Já usa datetime.date
             with col3:
                 st.time_input("Hora:", time(9, 0), step=1800, key="c_hora_input")
                 
@@ -198,11 +196,15 @@ def render_backoffice_admin():
         
         if not agenda_hoje.empty:
             df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status', 'id']].copy()
+            
+            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas
+            df_agenda['Data'] = df_agenda['horario'].dt.strftime('%d/%m/%Y')
             df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
 
             # --- GESTÃO DA AGENDA: BOTÕES DE AÇÃO ---
             st.dataframe(
-                df_agenda[['Hora', 'cliente', 'profissional', 'status', 'id']],
+                # Exibe Data e Hora nos campos formatados
+                df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status', 'id']],
                 column_config={
                     "id": st.column_config.Column(width="small", label="ID"),
                     "Ações": st.column_config.Column("Ações", width="large")
