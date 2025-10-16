@@ -2,7 +2,7 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, date, timedelta # Adicionado timedelta
+from datetime import datetime, time, date, timedelta
 import json 
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter # Importação para filtros de data
@@ -14,12 +14,15 @@ def get_firestore_client():
     Inicializa o cliente Firestore lendo a Service Account.
     """
     try:
+        # Tenta carregar as credenciais como string JSON (formato esperado)
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
 
         return firestore.Client.from_service_account_info(credenciais_dict)
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as credenciais.")
+        # O erro "Invalid grant: account not found" indica falha na credencial.
+        # Por favor, verifique se a string JSON_KEY_STRING nas secrets está correta.
+        st.error(f"Erro ao conectar ao Google Firestore. Falha na credencial ou permissão. Detalhe: {e}")
         st.stop()
 
 db = get_firestore_client()
@@ -58,6 +61,7 @@ def buscar_agendamento_por_pin(pin_code: str):
             data['id'] = doc.id 
             
             if 'horario' in data:
+                 # Converte o timestamp para datetime Python Naive (sem fuso)
                  data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             
             return data
@@ -76,6 +80,7 @@ def buscar_todos_agendamentos():
             item = doc.to_dict()
             item['id'] = doc.id
             if 'horario' in item:
+                # Converte o timestamp para datetime Python Naive (sem fuso)
                 item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
             data.append(item)
             
@@ -88,12 +93,9 @@ def buscar_todos_agendamentos():
 def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
     """
     Busca agendamentos por um intervalo de data/hora no Firestore.
-    RESOLVE O PROBLEMA DA "AGENDA DE HOJE"
+    Implementa o filtro de data no nível do banco de dados (mais robusto).
     """
     try:
-        # A API do Firestore exige que as datas sejam enviadas com fuso (timestamp)
-        # O Python envia o datetime, o Firestore o converte internamente.
-        
         docs = db.collection(COLECAO_AGENDAMENTOS).where(
             filter=FieldFilter('horario', '>=', start_dt)
         ).where(
