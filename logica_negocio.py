@@ -1,7 +1,7 @@
-# logica_negocio.py (FINAL)
+# logica_negocio.py (VERSÃO FINAL com Correção da Lógica de Hoje)
 
 import uuid
-from datetime import datetime, date, time, timedelta # Adicionado 'time' e 'timedelta'
+from datetime import datetime, date, time, timedelta
 import pandas as pd
 import random 
 
@@ -94,7 +94,7 @@ def buscar_agendamentos_hoje():
     if df.empty:
         return pd.DataFrame()
         
-    # 3. Filtra apenas os confirmados (se a query do DB não filtrou, fazemos aqui)
+    # 3. Filtra apenas os confirmados
     df_hoje = df[df['status'] == 'Confirmado']
     
     return df_hoje.sort_values(by='horario')
