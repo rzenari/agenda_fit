@@ -3,3 +3,5 @@ pandas
 google-cloud-firestore
 # Remova 'pendulum' (não é mais necessário)
 streamlit-pydantic # (Opcional, mas útil)
+pytz
+
