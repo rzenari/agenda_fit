@@ -1,4 +1,4 @@
-# logica_negocio.py (VERSÃO COM CORREÇÃO DE ÍNDICE E KEYERROR)
+# logica_negocio.py (VERSÃO MULTI-CLINICA)
 
 from datetime import datetime, timedelta, timezone, date, time
 import pandas as pd
@@ -17,17 +17,16 @@ def gerar_token_unico():
     """Gera um PIN numérico de 6 dígitos."""
     return str(random.randint(100000, 999999))
 
-def horario_esta_disponivel(profissional: str, data_hora_local: datetime, id_ignorada: str = None) -> bool:
-    """Verifica a disponibilidade de um horário, opcionalmente ignorando um agendamento existente."""
-    df = buscar_todos_agendamentos()
+def horario_esta_disponivel(clinic_id: str, profissional_nome: str, data_hora_local: datetime, id_ignorada: str = None) -> bool:
+    """Verifica a disponibilidade de um horário para um profissional de uma clínica específica."""
+    df = buscar_todos_agendamentos(clinic_id)
     if df.empty:
         return True
     
-    # Garante que a coluna de horário no DataFrame está no mesmo fuso horário para comparação
-    df['horario'] = df['horario'].dt.tz_convert(TZ_SAO_PAULO)
+    df['horario'] = pd.to_datetime(df['horario']).dt.tz_convert(TZ_SAO_PAULO)
 
     conflitos = df[
-        (df['profissional'] == profissional) &
+        (df['profissional_nome'] == profissional_nome) &
         (df['horario'] == data_hora_local) &
         (df['status'] == "Confirmado")
     ]
@@ -47,9 +46,9 @@ def processar_cancelamento_seguro(pin_code: str) -> bool:
 def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
     """Executa uma ação administrativa em um agendamento."""
     status_map = {"cancelar": "Cancelado (Admin)", "finalizar": "Finalizado", "no-show": "No-Show"}
-    return atualizar_status_agendamento(agendamento_id, status_map[acao]) if acao in status_map else False
+    return atualizar_status_agendamento(agendamento_id, status_map.get(acao)) if acao in status_map else False
 
-def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: datetime) -> tuple[bool, str]:
+def processar_remarcacao(pin: str, agendamento_id: str, profissional_nome: str, novo_horario_local: datetime) -> tuple[bool, str]:
     """Processa a lógica de remarcação de um agendamento pelo cliente."""
     agendamento_atual = buscar_agendamento_por_pin(pin)
     if not agendamento_atual:
@@ -58,7 +57,8 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
     if novo_horario_local < datetime.now(TZ_SAO_PAULO):
         return False, "Não é possível agendar para uma data ou hora no passado."
 
-    if not horario_esta_disponivel(agendamento_atual['profissional'], novo_horario_local, id_ignorada=agendamento_id):
+    clinic_id = agendamento_atual['clinic_id']
+    if not horario_esta_disponivel(clinic_id, profissional_nome, novo_horario_local, id_ignorada=agendamento_id):
         return False, "O novo horário escolhido já está ocupado."
 
     if atualizar_horario_agendamento(agendamento_id, novo_horario_local):
@@ -66,29 +66,25 @@ def processar_remarcacao(pin: str, agendamento_id: str, novo_horario_local: date
     else:
         return False, "Ocorreu um erro ao tentar salvar a remarcação."
 
-def buscar_agendamentos_por_data(data_selecionada: date):
-    """
-    Busca todos os agendamentos para uma data específica e depois filtra por status 'Confirmado'.
-    Isso evita a necessidade de um índice composto no Firestore.
-    """
+def buscar_agendamentos_por_data(clinic_id: str, data_selecionada: date):
+    """Busca agendamentos de uma clínica para uma data específica."""
     inicio_dia_local = datetime.combine(data_selecionada, time.min).replace(tzinfo=TZ_SAO_PAULO)
     fim_dia_local = datetime.combine(data_selecionada, time.max).replace(tzinfo=TZ_SAO_PAULO)
     
     inicio_dia_utc = inicio_dia_local.astimezone(timezone.utc)
     fim_dia_utc = fim_dia_local.astimezone(timezone.utc)
     
-    agendamentos = buscar_agendamentos_por_intervalo(inicio_dia_utc, fim_dia_utc)
+    agendamentos = buscar_agendamentos_por_intervalo(clinic_id, inicio_dia_utc, fim_dia_utc)
     df = pd.DataFrame(agendamentos)
     
     if not df.empty:
-        # Filtra por status "Confirmado" aqui, no código, em vez de na query do banco
         df = df[df['status'] == 'Confirmado']
         
     return df
 
-def get_relatorio_no_show() -> pd.DataFrame:
-    """Gera um relatório de faltas (no-show)."""
-    df = buscar_todos_agendamentos()
+def get_relatorio_no_show(clinic_id: str) -> pd.DataFrame:
+    """Gera um relatório de faltas (no-show) para uma clínica específica."""
+    df = buscar_todos_agendamentos(clinic_id)
     if df.empty: return pd.DataFrame()
     
     hoje_local = datetime.now(TZ_SAO_PAULO).date()
@@ -97,7 +93,7 @@ def get_relatorio_no_show() -> pd.DataFrame:
 
     if df_passado.empty: return pd.DataFrame()
 
-    df_grouped = df_passado.groupby('profissional').agg(
+    df_grouped = df_passado.groupby('profissional_nome').agg(
         total_sessoes=('status', 'size'),
         faltas=('status', lambda x: (x == 'No-Show').sum()),
         cancelados=('status', lambda x: (x.str.contains('Cancelado', na=False)).sum()),
