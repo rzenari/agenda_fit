@@ -1,4 +1,4 @@
-# logica_negocio.py (FINAL PARA FIRESTORE)
+# logica_negocio.py (FINAL)
 
 import uuid
 from datetime import datetime, date
@@ -13,16 +13,13 @@ def gerar_token_unico():
     return str(random.randint(100000, 999999))
 
 def horario_esta_disponivel(profissional: str, data_hora: datetime) -> bool:
-    """
-    Verifica se o horário está livre, consultando o DB (DataFrame).
-    """
+    """Verifica se o horário está livre, consultando o DB (DataFrame)."""
     df = buscar_todos_agendamentos()
     if df.empty:
         return True
     
     data_hora_naive = data_hora.replace(tzinfo=None)
         
-    # Filtra por profissional, data/hora e status
     conflito = df[
         (df['profissional'] == profissional) &
         (df['horario'] == data_hora_naive) & 
@@ -37,7 +34,6 @@ def processar_cancelamento_seguro(pin_code: str) -> bool:
     agendamento = buscar_agendamento_por_pin(pin_code)
     
     if agendamento and agendamento['status'] == "Confirmado":
-        # Chama a função de atualização do DB (usa o ID do Firestore, que é uma string)
         atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
         return True
         
@@ -54,16 +50,12 @@ def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
     novo_status = status_map.get(acao)
     
     if novo_status:
-        # Chama a função de atualização do DB usando o ID do documento (string)
         atualizar_status_agendamento(agendamento_id, novo_status)
         return True
     return False
 
-
 def get_relatorio_no_show() -> pd.DataFrame:
-    """
-    Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional.
-    """
+    """Função Python/Pandas para calcular e retornar a taxa de No-Show por profissional."""
     df = buscar_todos_agendamentos()
     
     if df.empty:
@@ -94,8 +86,16 @@ def buscar_agendamentos_hoje():
         return pd.DataFrame()
         
     hoje = datetime.now().date()
+    
+    # 1. Adiciona a coluna de data pura (sem hora) ao DataFrame para comparação
+    df['data_agendamento'] = df['horario'].dt.date
+    
+    # 2. Filtra pela data de hoje e status
     df_hoje = df[
-        (df['horario'].dt.date == hoje) & 
+        (df['data_agendamento'] == hoje) & 
         (df['status'] == 'Confirmado')
     ]
+    # Remove a coluna temporária
+    df_hoje = df_hoje.drop(columns=['data_agendamento'])
+    
     return df_hoje.sort_values(by='horario')
