@@ -67,20 +67,29 @@ def processar_remarcacao(pin: str, agendamento_id: str, profissional_nome: str, 
         return False, "Ocorreu um erro ao tentar salvar a remarcação."
 
 def buscar_agendamentos_por_data(clinic_id: str, data_selecionada: date):
-    """Busca agendamentos de uma clínica para uma data específica."""
-    inicio_dia_local = datetime.combine(data_selecionada, time.min).replace(tzinfo=TZ_SAO_PAULO)
-    fim_dia_local = datetime.combine(data_selecionada, time.max).replace(tzinfo=TZ_SAO_PAULO)
+    """
+    Busca agendamentos de uma clínica para uma data específica, filtrando no código
+    para evitar problemas com índices do Firestore.
+    """
+    df_total = buscar_todos_agendamentos(clinic_id)
     
-    inicio_dia_utc = inicio_dia_local.astimezone(timezone.utc)
-    fim_dia_utc = fim_dia_local.astimezone(timezone.utc)
+    if df_total.empty:
+        return pd.DataFrame()
+
+    # Assegura que a coluna 'horario' é do tipo datetime e está no fuso correto
+    df_total['horario'] = pd.to_datetime(df_total['horario']).dt.tz_convert(TZ_SAO_PAULO)
+
+    # Filtra pelo dia selecionado e pelo status
+    df_filtrado = df_total[
+        (df_total['horario'].dt.date == data_selecionada) &
+        (df_total['status'] == 'Confirmado')
+    ]
+
+    # Ordena pelo horário
+    if not df_filtrado.empty:
+        df_filtrado = df_filtrado.sort_values(by='horario')
     
-    agendamentos = buscar_agendamentos_por_intervalo(clinic_id, inicio_dia_utc, fim_dia_utc)
-    df = pd.DataFrame(agendamentos)
-    
-    if not df.empty:
-        df = df[df['status'] == 'Confirmado']
-        
-    return df
+    return df_filtrado
 
 def get_relatorio_no_show(clinic_id: str) -> pd.DataFrame:
     """Gera um relatório de faltas (no-show) para uma clínica específica."""
