@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM REMARCAÇÃO E CANCELAMENTO EM MASSA)
+# app.py (VERSÃO COM FUNÇÃO DE ADMIN RESTAURADA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -38,7 +38,7 @@ if 'agendamentos_selecionados' not in st.session_state:
     st.session_state.agendamentos_selecionados = {}
 
 
-# --- FUNÇÕES DE CALLBACK ---
+# --- FUNÇÕES DE CALLBACK E AÇÕES ---
 def handle_agendamento_submission():
     cliente = st.session_state.c_nome_input
     profissional = st.session_state.c_prof_input
@@ -60,7 +60,6 @@ def handle_agendamento_submission():
         if resultado is True:
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'status': True}
-            # Limpa campos
             st.session_state.c_nome_input, st.session_state.c_tel_input = "", ""
         else:
             st.session_state.last_agendamento_info = {'status': str(resultado)}
@@ -95,8 +94,17 @@ def handle_cancelar_selecionados():
             sucessos += 1
     
     st.success(f"{sucessos} de {len(ids_para_cancelar)} agendamentos cancelados com sucesso.")
-    st.session_state.agendamentos_selecionados = {} # Limpa a seleção
+    st.session_state.agendamentos_selecionados = {}
     st.rerun()
+
+# FUNÇÃO RESTAURADA
+def handle_admin_action(id_agendamento: str, acao: str):
+    """Lida com cliques nos botões de ação do admin (concluir, falta, cancelar)."""
+    if acao_admin_agendamento(id_agendamento, acao):
+        st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
+        st.rerun()
+    else:
+        st.error("Falha ao registrar a ação no sistema.")
 
 
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
@@ -188,7 +196,8 @@ def render_backoffice_admin():
                     st.session_state.agendamentos_selecionados[ag_id] = False
                 
                 cols = st.columns([0.1, 0.8, 0.5, 0.5, 0.5])
-                selecionado = cols[0].checkbox("", key=f"select_{ag_id}", value=st.session_state.agendamentos_selecionados[ag_id])
+                # CORREÇÃO DO AVISO DE LABEL VAZIA
+                selecionado = cols[0].checkbox(" ", key=f"select_{ag_id}", value=st.session_state.agendamentos_selecionados[ag_id], label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
                 
                 cols[1].write(f"**{row['cliente']}** ({row['horario'].strftime('%H:%M')})")
