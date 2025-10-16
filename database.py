@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL com Força de Leitura no Firestore)
+# database.py (VERSÃO FINAL E FUNCIONAL PARA FIRESTORE)
 
 import streamlit as st
 import pandas as pd
@@ -10,14 +10,18 @@ from google.cloud.firestore_v1.base_query import FieldFilter # Importação para
 # --- Inicialização da Conexão ---
 @st.cache_resource
 def get_firestore_client():
-    """Inicializa o cliente Firestore."""
+    """
+    Inicializa o cliente Firestore lendo a Service Account.
+    """
     try:
+        # Lembre-se: 'json_key_string' deve ser o nome da chave nos Secrets
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
 
         return firestore.Client.from_service_account_info(credenciais_dict)
     except Exception as e:
-        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as credenciais.")
+        # O erro 'invalid_grant' é capturado aqui.
+        st.error(f"Erro ao conectar ao Google Firestore. Falha na credencial ou permissão. Detalhe: {e}")
         st.stop()
 
 db = get_firestore_client()
@@ -25,20 +29,58 @@ COLECAO_AGENDAMENTOS = "agendamentos"
 
 
 # --- Funções de Operação no Banco de Dados (NoSQL) ---
-# [salvar_agendamento omitido, permanece o mesmo]
+
+def salvar_agendamento(dados: dict, pin_code: str):
+    """Cria um novo documento (agendamento) no Firestore e retorna True ou a string de erro."""
+    
+    data_para_salvar = {
+        'pin_code': str(pin_code),
+        'profissional': dados['profissional'],
+        'cliente': dados['cliente'],
+        'telefone': dados['telefone'],
+        'horario': dados['horario'],  
+        'status': "Confirmado",
+        'is_pacote_sessao': False 
+    }
+    
+    try:
+        # Adiciona o documento, o Firestore gera o ID
+        db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
+        return True # Sucesso
+    except Exception as e:
+        return str(e) # Retorna a mensagem de erro
+
+
+def buscar_agendamento_por_pin(pin_code: str):
+    """Busca um agendamento pelo PIN (Query NoSQL)."""
+    try:
+        # Query: SELECT * FROM agendamentos WHERE pin_code = pin_code
+        docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
+        
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id 
+            
+            if 'horario' in data:
+                 # Converte o timestamp para datetime Python Naive (sem fuso)
+                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
+            
+            return data
+            
+        return None
+    except Exception as e:
+        print(f"ERRO NA BUSCA POR PIN: {e}")
+        return None
 
 def buscar_todos_agendamentos():
-    """Busca todos os agendamentos e retorna um DataFrame. SEM CACHE."""
+    """Busca todos os agendamentos e retorna um DataFrame."""
     try:
-        # AQUI É A CORREÇÃO: Usamos .order_by('horario') para forçar o Firestore a indexar e retornar dados
-        # O Firestore é preguiçoso e a ordem pode ser vital.
-        docs = db.collection(COLECAO_AGENDAMENTOS).order_by('horario').stream()
+        docs = db.collection(COLECAO_AGENDAMENTOS).stream()
         data = []
         for doc in docs:
             item = doc.to_dict()
             item['id'] = doc.id
             if 'horario' in item:
-                # Converte o timestamp para datetime Python Naive (sem fuso)
                 item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
             data.append(item)
             
@@ -54,6 +96,8 @@ def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
     Implementa o filtro de data no nível do banco de dados (mais robusto).
     """
     try:
+        # A API do Firestore exige que as datas sejam enviadas como objeto datetime/TimeStamp.
+        
         docs = db.collection(COLECAO_AGENDAMENTOS).where(
             filter=FieldFilter('horario', '>=', start_dt)
         ).where(
@@ -98,4 +142,3 @@ def buscar_agendamento_por_id(id_agendamento: str):
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
     return None
-
