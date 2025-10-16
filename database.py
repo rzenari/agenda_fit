@@ -1,10 +1,11 @@
-# database.py (VERSÃO COM DEBUG PARA O PROBLEMA DO PIN)
+# database.py (VERSÃO FINAL COM SINTAXE MODERNA E DEBUG)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, date, timedelta
 import json
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter # Importação para a sintaxe moderna
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
@@ -44,17 +45,16 @@ def salvar_agendamento(dados: dict, pin_code: str):
         return f"Erro de DB: {e}"
 
 def buscar_agendamento_por_pin(pin_code: str):
-    """Busca um agendamento pelo PIN usando o método .get() para maior robustez."""
+    """Busca um agendamento pelo PIN usando o método .get() e sintaxe FieldFilter."""
     
-    # --- DEBUG INSERIDO AQUI ---
     # Este print aparecerá no terminal/logs onde o Streamlit está rodando
     print(f"--- [DEBUG DB] Iniciando busca por PIN: {pin_code} (tipo: {type(pin_code)}) ---")
 
     try:
-        query = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1)
+        # CORREÇÃO: Usando a sintaxe 'filter' para eliminar warnings e ser mais explícito
+        query = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1)
         docs = query.get()
         
-        # --- DEBUG INSERIDO AQUI ---
         if not docs:
             print(f"--- [DEBUG DB] Nenhum documento encontrado para o PIN: {pin_code} ---")
             return None
@@ -71,7 +71,6 @@ def buscar_agendamento_por_pin(pin_code: str):
         return data
             
     except Exception as e:
-        # --- DEBUG INSERIDO AQUI ---
         print(f"--- [DEBUG DB] ERRO DURANTE A EXECUÇÃO DA QUERY: {e} ---")
         return None
 
@@ -98,10 +97,13 @@ def buscar_todos_agendamentos():
 def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
     """Busca agendamentos por um intervalo de data/hora no Firestore."""
     try:
-        docs = db.collection(COLECAO_AGENDAMENTOS)\
-            .where('horario', '>=', start_dt)\
-            .where('horario', '<', end_dt)\
-            .order_by('horario').stream()
+        # CORREÇÃO: Usando a sintaxe 'filter' também aqui
+        query = db.collection(COLECAO_AGENDAMENTOS) \
+            .where(filter=FieldFilter('horario', '>=', start_dt)) \
+            .where(filter=FieldFilter('horario', '<', end_dt)) \
+            .order_by('horario')
+        
+        docs = query.stream()
         
         data = []
         for doc in docs:
