@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM CORREÇÃO DE FUSO E FILTRO DE DATA NA AGENDA)
+# app.py (VERSÃO COM CORREÇÃO DE ÍNDICE E KEYERROR)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -36,7 +36,6 @@ if 'remarcando' not in st.session_state:
     st.session_state.remarcando = False
 if 'agendamentos_selecionados' not in st.session_state:
     st.session_state.agendamentos_selecionados = {}
-# Adiciona o filtro de data ao session state, com o valor padrão sendo hoje
 if 'data_filtro_agenda' not in st.session_state:
     st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
 
@@ -68,13 +67,14 @@ def handle_agendamento_submission():
         if resultado is True:
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'status': True}
-            # Define o filtro da agenda para a data do novo agendamento
             st.session_state.data_filtro_agenda = data_consulta
             st.session_state.c_nome_input, st.session_state.c_tel_input = "", ""
         else:
-            st.session_state.last_agendamento_info = {'status': str(resultado)}
+            # Garante que o nome do cliente seja passado na mensagem de erro
+            st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
     else:
-        st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro."}
+        # Garante que o nome do cliente seja passado na mensagem de erro
+        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Horário já ocupado! Tente outro."}
     st.rerun()
 
 def handle_remarcar_confirmacao(pin, agendamento_id):
@@ -180,13 +180,16 @@ def render_backoffice_admin():
     with tab1:
         st.header("📝 Agendamento Rápido e Manual")
         
+        # Lógica de exibição de mensagem de status corrigida
         if st.session_state.get('last_agendamento_info'):
             info = st.session_state.last_agendamento_info
-            if info.get('status'):
-                st.success(f"Agendado para {info['cliente']} com sucesso!")
-                st.markdown(f"**LINK DE GESTÃO:** `{info['link_gestao']}`")
+            # Checa explicitamente se o status é True (sucesso)
+            if info.get('status') is True:
+                st.success(f"Agendado para {info.get('cliente')} com sucesso!")
+                st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}`")
+            # Se não for True, é uma mensagem de erro
             else:
-                st.error(f"Erro: {info['status']}")
+                st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
             st.session_state.last_agendamento_info = None
 
         with st.form("admin_form"):
@@ -204,7 +207,6 @@ def render_backoffice_admin():
         st.markdown("---")
         st.header("🗓️ Agenda")
         
-        # Filtro de data para a agenda
         data_selecionada = st.date_input(
             "Filtrar por data:",
             key='data_filtro_agenda',
