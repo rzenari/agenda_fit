@@ -1,4 +1,4 @@
-# database.py (VERSÃO FINAL COM DIAGNÓSTICO DE CREDENCIAIS)
+# database.py (VERSÃO FINAL com Firestore SEM Cache nos Dados)
 
 import streamlit as st
 import pandas as pd
@@ -6,32 +6,18 @@ from datetime import datetime, time, date
 import json 
 from google.cloud import firestore
 
-# --- Inicialização da Conexão ---
+# --- Inicialização da Conexão (Chave única) ---
+# O cache nesta função é OBRIGATÓRIO para evitar recriar a conexão do cliente a cada rerun
 @st.cache_resource
 def get_firestore_client():
-    """
-    Inicializa o cliente Firestore lendo a Service Account como uma string JSON inteira.
-    Faz diagnóstico se a autenticação falhar.
-    """
+    """Inicializa o cliente Firestore lendo a Service Account."""
     try:
-        # 1. Leitura da string JSON completa
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
 
-        # 2. DEBUG CRÍTICO: Imprime no console se o project_id está sendo lido
-        print(f"DEBUG: Project ID lido: {credenciais_dict.get('project_id', 'FALHA AO LER PROJECT ID')}")
-        
-        # 3. Usa o dicionário decodificado para autenticar
         return firestore.Client.from_service_account_info(credenciais_dict)
-    except KeyError:
-        st.error("Erro Crítico: O campo 'json_key_string' está faltando na seção [firestore] dos Secrets.")
-        st.stop()
-    except json.JSONDecodeError as e:
-        st.error(f"Erro de formato JSON. Detalhe: {e}. Verifique as aspas/quebras de linha da Private Key nos Secrets.")
-        st.stop()
     except Exception as e:
-        # AQUI ESTÁ O TRATAMENTO DO ERRO DE AUTENTICAÇÃO DO GOOGLE
-        st.error(f"Erro ao conectar ao Google Firestore. Motivo: Falha de autenticação. (Detalhe: {e})")
+        st.error(f"Erro ao conectar ao Google Firestore. Detalhe: {e}. Verifique as credenciais.")
         st.stop()
 
 db = get_firestore_client()
@@ -79,6 +65,7 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
         return None
 
+# NENHUM DECORADOR DE CACHE AQUI PARA GARANTIR DADOS FRESCOS
 def buscar_todos_agendamentos():
     """Busca todos os agendamentos e retorna um DataFrame."""
     try:
