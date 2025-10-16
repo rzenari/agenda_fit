@@ -1,7 +1,7 @@
-# app.py (VERSÃO CORRIGIDA PARA DEBUG: MOSTRAR TUDO)
+# app.py (VERSÃO FINAL COM LIMPEZA DE FORMULÁRIO E RESTAURAÇÃO DO FILTRO)
 
 import streamlit as st
-from datetime import datetime, time
+from datetime import datetime, time, date, timedelta
 import pandas as pd
 import random
 
@@ -52,7 +52,6 @@ def handle_agendamento_submission():
     st.session_state.last_agendamento_info = None
 
     if not cliente:
-        # Define a mensagem de erro no session_state para ser exibida no próximo run
         st.session_state.last_agendamento_info = {'status': "Nome do cliente é obrigatório.", 'cliente': ''}
         st.rerun()
         return
@@ -71,18 +70,27 @@ def handle_agendamento_submission():
             link_base = f"https://agendafit.streamlit.app" 
             link_gestao = f"{link_base}?pin={pin_code}" 
             
+            # ARMAZENA O SUCESSO
             st.session_state.last_agendamento_info = {
                 'cliente': cliente,
                 'pin_code': pin_code,
                 'link_gestao': link_gestao,
-                'status': True # Sucesso
+                'status': True 
             }
+            
+            # 5. LIMPEZA DOS CAMPOS APÓS O SUCESSO (CORREÇÃO)
+            st.session_state.c_nome_input = ""
+            st.session_state.c_tel_input = ""
+            st.session_state.c_data_input = datetime.today().date()
+            st.session_state.c_hora_input = time(9, 0)
+            
         else:
             # Erro do DB
             st.session_state.last_agendamento_info = {
                 'cliente': cliente,
                 'status': str(resultado)
             }
+
     else:
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
 
@@ -167,22 +175,34 @@ def render_backoffice_admin():
             if info['status'] is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
-            elif info['status'] is not None:
-                # EXIBE O ERRO DETALHADO DO DB AQUI
+            elif "Erro de DB" in info['status']:
                 st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
+            elif info['status'] is not None:
+                st.error(f"Problema no Agendamento para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             
             st.session_state.last_agendamento_info = None
+        
+        # GARANTE QUE OS CAMPOS ESTEJAM LIMPOS SE NÃO HOUVER VALOR NO SESSION STATE
+        if 'c_nome_input' not in st.session_state:
+            st.session_state.c_nome_input = ""
+        if 'c_tel_input' not in st.session_state:
+            st.session_state.c_tel_input = ""
+        if 'c_data_input' not in st.session_state:
+            st.session_state.c_data_input = datetime.today().date()
+        if 'c_hora_input' not in st.session_state:
+            st.session_state.c_hora_input = time(9, 0)
         
         with st.form("admin_form"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.text_input("Nome do Cliente:", key="c_nome_input", value="Rafaello Zenari")
-                st.text_input("Telefone (para link gestão):", key="c_tel_input", value="21998819121")
+                # Usa o valor do session state para controlar o campo
+                st.text_input("Nome do Cliente:", key="c_nome_input")
+                st.text_input("Telefone (para link gestão):", key="c_tel_input")
             with col2:
                 st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
-                st.date_input("Data:", datetime.today().date(), key="c_data_input") 
+                st.date_input("Data:", key="c_data_input") 
             with col3:
-                st.time_input("Hora:", time(9, 0), step=1800, key="c_hora_input")
+                st.time_input("Hora:", step=1800, key="c_hora_input")
                 
                 # CHAMA O CALLBACK: A lógica de salvamento agora está na função
                 submitted = st.form_submit_button(
@@ -192,13 +212,13 @@ def render_backoffice_admin():
                 )
 
         
-        st.subheader("TODOS os Agendamentos (DEBUG)")
-        agenda_hoje = buscar_agendamentos_hoje() # **MUDANÇA TEMPORÁRIA NO LOGICA_NEGOCIO.PY**
+        st.subheader("Agenda de Hoje")
+        agenda_hoje = buscar_agendamentos_hoje()
         
         if not agenda_hoje.empty:
             df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status', 'id']].copy()
             
-            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas
+            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas para DD/MM/AAAA
             df_agenda['Data'] = df_agenda['horario'].dt.strftime('%d/%m/%Y')
             df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
 
@@ -242,7 +262,7 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2: Relatórios e Faltas (omissões por brevidade) ---
+    # --- TAB 2 e TAB 3 (omissões por brevidade) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
         
