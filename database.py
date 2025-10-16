@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM CORREÇÃO ROBUSTA NA BUSCA POR PIN)
+# database.py (VERSÃO COM DEBUG PARA O PROBLEMA DO PIN)
 
 import streamlit as st
 import pandas as pd
@@ -13,10 +13,8 @@ def get_firestore_client():
     Inicializa o cliente Firestore lendo a Service Account dos Secrets do Streamlit.
     """
     try:
-        # 'json_key_string' deve ser o nome da chave nos Secrets
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
-
         return firestore.Client.from_service_account_info(credenciais_dict)
     except Exception as e:
         st.error(f"Erro ao conectar ao Google Firestore. Falha na credencial ou permissão. Detalhe: {e}")
@@ -30,7 +28,6 @@ COLECAO_AGENDAMENTOS = "agendamentos"
 
 def salvar_agendamento(dados: dict, pin_code: str):
     """Cria um novo documento (agendamento) no Firestore e retorna True ou a string de erro."""
-    
     data_para_salvar = {
         'pin_code': str(pin_code),
         'profissional': dados['profissional'],
@@ -40,40 +37,42 @@ def salvar_agendamento(dados: dict, pin_code: str):
         'status': "Confirmado",
         'is_pacote_sessao': False 
     }
-    
     try:
         db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
         return True
     except Exception as e:
         return f"Erro de DB: {e}"
 
-# --- CORREÇÃO APLICADA AQUI (MUDANÇA DE .stream() PARA .get()) ---
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN usando o método .get() para maior robustez."""
+    
+    # --- DEBUG INSERIDO AQUI ---
+    # Este print aparecerá no terminal/logs onde o Streamlit está rodando
+    print(f"--- [DEBUG DB] Iniciando busca por PIN: {pin_code} (tipo: {type(pin_code)}) ---")
+
     try:
-        # Constrói a query para buscar o documento com o PIN correspondente
         query = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1)
-        
-        # Executa a query usando .get(), que retorna uma lista de documentos
         docs = query.get()
         
-        # Se a lista de documentos estiver vazia, significa que o PIN não foi encontrado
+        # --- DEBUG INSERIDO AQUI ---
         if not docs:
+            print(f"--- [DEBUG DB] Nenhum documento encontrado para o PIN: {pin_code} ---")
             return None
         
-        # Pega o primeiro (e único) documento da lista
+        print(f"--- [DEBUG DB] Documento encontrado! ID: {docs[0].id} ---")
+        
         doc = docs[0]
         data = doc.to_dict()
         data['id'] = doc.id 
         
-        # Converte o timestamp do Firestore para um objeto datetime do Python
         if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
             data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
         
         return data
             
     except Exception as e:
-        print(f"ERRO NA BUSCA POR PIN: {e}")
+        # --- DEBUG INSERIDO AQUI ---
+        print(f"--- [DEBUG DB] ERRO DURANTE A EXECUÇÃO DA QUERY: {e} ---")
         return None
 
 def buscar_todos_agendamentos():
@@ -97,11 +96,8 @@ def buscar_todos_agendamentos():
 
 
 def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
-    """
-    Busca agendamentos por um intervalo de data/hora no Firestore.
-    """
+    """Busca agendamentos por um intervalo de data/hora no Firestore."""
     try:
-        # Usando a sintaxe antiga de query encadeada para máxima compatibilidade.
         docs = db.collection(COLECAO_AGENDAMENTOS)\
             .where('horario', '>=', start_dt)\
             .where('horario', '<', end_dt)\
