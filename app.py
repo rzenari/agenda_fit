@@ -67,7 +67,7 @@ def handle_agendamento_submission():
         resultado = salvar_agendamento(dados, pin_code)
         
         if resultado is True:
-            link_base = f"https://agendafit.streamlit.app" 
+            link_base = "https://agendafit.streamlit.app"
             link_gestao = f"{link_base}?pin={pin_code}" 
             
             # ARMAZENA O SUCESSO
@@ -139,8 +139,8 @@ def render_agendamento_seguro():
                     st.error("Erro ao cancelar. Tente novamente ou contate o profissional.")
 
         with col2:
-             st.button("🔄 REMARCAR (Em Breve)", use_container_width=True, disabled=True)
-             
+                st.button("🔄 REMARCAR (Em Breve)", use_container_width=True, disabled=True)
+            
     elif agendamento:
         st.warning(f"Este agendamento já está: {agendamento['status']}. Não é possível alterar online.")
     else:
@@ -174,10 +174,10 @@ def render_backoffice_admin():
             
             if info['status'] is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
-                st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
-            elif "Erro de DB" in info['status']:
+                st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `{info['link_gestao']}`")
+            elif "Erro de DB" in info.get('status', ''):
                 st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
-            elif info['status'] is not None:
+            elif info.get('status') is not None:
                 st.error(f"Problema no Agendamento para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             
             st.session_state.last_agendamento_info = None
@@ -202,7 +202,7 @@ def render_backoffice_admin():
                 st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
                 st.date_input("Data:", key="c_data_input") 
             with col3:
-                st.time_input("Hora:", step=1800, key="c_hora_input")
+                st.time_input("Hora:", step=timedelta(minutes=30), key="c_hora_input")
                 
                 # CHAMA O CALLBACK: A lógica de salvamento agora está na função
                 submitted = st.form_submit_button(
@@ -224,37 +224,41 @@ def render_backoffice_admin():
 
             # --- GESTÃO DA AGENDA: BOTÕES DE AÇÃO ---
             st.dataframe(
-                df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status', 'id']],
-                column_config={
-                    "id": st.column_config.Column(width="small", label="ID"),
-                    "Ações": st.column_config.Column("Ações", width="large")
-                },
-                on_select="ignore", 
+                df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status']],
                 use_container_width=True, 
                 hide_index=True,
             )
             
+            st.markdown("---")
+            st.write("**Ações Administrativas:**")
+
             # Renderiza os botões de ação abaixo do DataFrame
             for index, row in df_agenda.iterrows():
-                col_id, col_finalizar, col_no_show, col_cancelar = st.columns([0.5, 1, 1, 1])
+                col_id, col_cliente, col_finalizar, col_no_show, col_cancelar = st.columns([0.5, 1.5, 1, 1, 1])
                 
-                col_id.markdown(f"**ID:** {row['id']}") 
+                with col_id:
+                    st.caption(f"ID: {row['id']}") 
+                with col_cliente:
+                    st.write(f"**{row['cliente']}**")
 
-                col_finalizar.button("✅ Sessão Concluída", 
-                                     key=f"finish_{row['id']}", 
+                with col_finalizar:
+                    st.button("✅ Concluída",
+                                     key=f"finish_{row['id']}",
                                      on_click=handle_admin_action, 
                                      args=(row['id'], "finalizar"),
-                                     type="primary")
+                                     type="primary", use_container_width=True)
                 
-                col_no_show.button("🚫 Marcar Falta", 
-                                  key=f"noshow_{row['id']}", 
-                                  on_click=handle_admin_action, 
-                                  args=(row['id'], "no-show"))
+                with col_no_show:
+                    st.button("🚫 Falta", 
+                                     key=f"noshow_{row['id']}", 
+                                     on_click=handle_admin_action, 
+                                     args=(row['id'], "no-show"), use_container_width=True)
 
-                col_cancelar.button("❌ Cancelar", 
-                                    key=f"cancel_{row['id']}", 
-                                    on_click=handle_admin_action, 
-                                    args=(row['id'], "cancelar"))
+                with col_cancelar:
+                    st.button("❌ Cancelar", 
+                                     key=f"cancel_{row['id']}", 
+                                     on_click=handle_admin_action, 
+                                     args=(row['id'], "cancelar"), use_container_width=True)
 
                 st.markdown("---", unsafe_allow_html=True) 
 
@@ -262,7 +266,7 @@ def render_backoffice_admin():
             st.info("Nenhuma consulta confirmada para hoje.")
 
 
-    # --- TAB 2 e TAB 3 (omissões por brevidade) ---
+    # --- TAB 2 e TAB 3 (sem alterações) ---
     with tab2:
         st.header("📈 Relatórios: Redução de Faltas (No-Show)")
         
@@ -277,7 +281,7 @@ def render_backoffice_admin():
 
             col1, col2 = st.columns(2)
             col1.metric("Taxa Média de No-Show", f"{taxa_media:.2f}%")
-            col2.metric("Total de Sessões Ocorridas/Faltadas", total_atendimentos)
+            col2.metric("Total de Sessões Ocorridas/Faltadas", int(total_atendimentos))
 
             st.dataframe(df_relatorio.rename(columns={
                 'total_atendimentos': 'Total Sessões', 
@@ -293,7 +297,7 @@ def render_backoffice_admin():
 
     with tab3:
         st.header("⚙️ Gestão de Pacotes e Otimização")
-        st.warning("Funcionalidades avançadas em desenvolvimento. Necessita de uma tabela 'pacotes' no Supabase.")
+        st.warning("Funcionalidades avançadas em desenvolvimento.")
         st.markdown("""
         **Otimizador de Pacotes:**
         1.  Gerenciar quantos créditos o cliente tem (Ex: 10/12 sessões).
