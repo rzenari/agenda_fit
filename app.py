@@ -1,4 +1,4 @@
-# app.py (VERSÃO FINAL: Correção da Visualização PT-BR e Callback)
+# app.py (VERSÃO CORRIGIDA PARA DEBUG: MOSTRAR TUDO)
 
 import streamlit as st
 from datetime import datetime, time
@@ -23,7 +23,6 @@ PROFISSIONAIS = ["Dr. João (Físio)", "Dra. Maria (Pilates)", "Dr. Pedro (Nutri
 # Inicialização do DB (Chama o client Firestore)
 db_client = get_firestore_client()
 if db_client is None:
-    # Se a conexão falhar (devido a erro de credencial, como o Timeout / Invalid grant), o app para
     st.stop() 
 
 
@@ -82,8 +81,7 @@ def handle_agendamento_submission():
             # Erro do DB
             st.session_state.last_agendamento_info = {
                 'cliente': cliente,
-                # CAPTURA E EXIBE O ERRO DE CREDENCIAL DO FIRESTORE/TIMEOUT
-                'status': f"Erro de DB: {str(resultado)}" 
+                'status': str(resultado)
             }
     else:
         st.session_state.last_agendamento_info = {'status': "Horário já ocupado! Tente outro.", 'cliente': cliente}
@@ -169,14 +167,10 @@ def render_backoffice_admin():
             if info['status'] is True:
                 st.success(f"Consulta agendada para {info['cliente']} com sucesso!")
                 st.markdown(f"**LINK DE GESTÃO PARA O CLIENTE:** `[PIN: {info['pin_code']}] {info['link_gestao']}`")
-            elif "Erro de DB" in info['status']:
-                # EXIBE O ERRO DE CONEXÃO/CREDENCIAIS AQUI
-                st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             elif info['status'] is not None:
-                # EXIBE ERROS DE LÓGICA (Horário Ocupado, etc.)
-                st.error(f"Problema no Agendamento para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
+                # EXIBE O ERRO DETALHADO DO DB AQUI
+                st.error(f"Erro ao salvar no banco de dados para {info.get('cliente', 'cliente não informado')}. Motivo: {info['status']}")
             
-            # Limpa o estado depois de exibir
             st.session_state.last_agendamento_info = None
         
         with st.form("admin_form"):
@@ -186,11 +180,9 @@ def render_backoffice_admin():
                 st.text_input("Telefone (para link gestão):", key="c_tel_input", value="21998819121")
             with col2:
                 st.selectbox("Profissional:", PROFISSIONAIS, key="c_prof_input")
-                # O formato de entrada de data é definido pelo navegador/Streamlit e não pode ser forçado para DD/MM/AAAA.
-                st.date_input("Data:", datetime.today().date(), key="c_data_input")
+                st.date_input("Data:", datetime.today().date(), key="c_data_input") 
             with col3:
-                # Usando o horário atual como valor padrão, mas permitindo edição
-                st.time_input("Hora:", datetime.now().time().replace(second=0, microsecond=0), step=1800, key="c_hora_input")
+                st.time_input("Hora:", time(9, 0), step=1800, key="c_hora_input")
                 
                 # CHAMA O CALLBACK: A lógica de salvamento agora está na função
                 submitted = st.form_submit_button(
@@ -200,23 +192,18 @@ def render_backoffice_admin():
                 )
 
         
-        st.subheader("Agenda de Hoje")
-        agenda_hoje = buscar_agendamentos_hoje()
+        st.subheader("TODOS os Agendamentos (DEBUG)")
+        agenda_hoje = buscar_agendamentos_hoje() # **MUDANÇA TEMPORÁRIA NO LOGICA_NEGOCIO.PY**
         
         if not agenda_hoje.empty:
             df_agenda = agenda_hoje[['horario', 'cliente', 'profissional', 'status', 'id']].copy()
             
-            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas para DD/MM/AAAA
+            # CORREÇÃO DA VISUALIZAÇÃO PT-BR: Cria novas colunas formatadas
             df_agenda['Data'] = df_agenda['horario'].dt.strftime('%d/%m/%Y')
             df_agenda['Hora'] = df_agenda['horario'].dt.strftime('%H:%M')
-            
-            # Remove a coluna original 'horario' para não confundir
-            df_agenda = df_agenda.drop(columns=['horario'])
-
 
             # --- GESTÃO DA AGENDA: BOTÕES DE AÇÃO ---
             st.dataframe(
-                # Exibe Data e Hora nos campos formatados
                 df_agenda[['Data', 'Hora', 'cliente', 'profissional', 'status', 'id']],
                 column_config={
                     "id": st.column_config.Column(width="small", label="ID"),
