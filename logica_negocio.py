@@ -1,12 +1,12 @@
 # logica_negocio.py (FINAL)
 
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta # Adicionado 'time' e 'timedelta'
 import pandas as pd
 import random 
 
 # Importações de funções de DB
-from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_pin, buscar_agendamento_por_id
+from database import buscar_todos_agendamentos, atualizar_status_agendamento, buscar_agendamento_por_pin, buscar_agendamento_por_id, buscar_agendamentos_por_intervalo
 
 def gerar_token_unico():
     """Gera um código PIN numérico de 6 dígitos."""
@@ -80,22 +80,21 @@ def get_relatorio_no_show() -> pd.DataFrame:
     return df_grouped.sort_values(by='Taxa No-Show (%)', ascending=False).reset_index()
 
 def buscar_agendamentos_hoje():
-    """Busca apenas os agendamentos confirmados para o dia de hoje."""
-    df = buscar_todos_agendamentos()
+    """Busca apenas os agendamentos confirmados para o dia de hoje, usando filtro por intervalo."""
+    
+    # 1. Define o intervalo de hoje (da 00:00:00 de hoje até 00:00:00 de amanhã)
+    hoje_data = datetime.now().date()
+    # Cria o objeto datetime naive no fuso local (00:00:00)
+    start_of_day = datetime.combine(hoje_data, time.min) 
+    end_of_day = start_of_day + timedelta(days=1)
+    
+    # 2. Chama a busca por intervalo (filtra no Firestore)
+    df = buscar_agendamentos_por_intervalo(start_of_day, end_of_day)
+    
     if df.empty:
         return pd.DataFrame()
         
-    hoje = datetime.now().date()
-    
-    # 1. Adiciona a coluna de data pura (sem hora) ao DataFrame para comparação
-    df['data_agendamento'] = df['horario'].dt.date
-    
-    # 2. Filtra pela data de hoje e status
-    df_hoje = df[
-        (df['data_agendamento'] == hoje) & 
-        (df['status'] == 'Confirmado')
-    ]
-    # Remove a coluna temporária
-    df_hoje = df_hoje.drop(columns=['data_agendamento'])
+    # 3. Filtra apenas os confirmados (se a query do DB não filtrou, fazemos aqui)
+    df_hoje = df[df['status'] == 'Confirmado']
     
     return df_hoje.sort_values(by='horario')
