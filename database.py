@@ -1,11 +1,10 @@
-# database.py (VERSÃO COM CORREÇÃO NA BUSCA POR PIN)
+# database.py (VERSÃO COM CORREÇÃO ROBUSTA NA BUSCA POR PIN)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, date, timedelta
 import json
 from google.cloud import firestore
-# A importação do FieldFilter não é mais necessária com a sintaxe antiga
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
@@ -48,23 +47,31 @@ def salvar_agendamento(dados: dict, pin_code: str):
     except Exception as e:
         return f"Erro de DB: {e}"
 
-# --- CORREÇÃO APLICADA AQUI ---
+# --- CORREÇÃO APLICADA AQUI (MUDANÇA DE .stream() PARA .get()) ---
 def buscar_agendamento_por_pin(pin_code: str):
-    """Busca um agendamento pelo PIN (Query NoSQL) com sintaxe compatível."""
+    """Busca um agendamento pelo PIN usando o método .get() para maior robustez."""
     try:
-        # Query usando a sintaxe antiga ('campo', 'operador', 'valor') para máxima compatibilidade.
-        docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
+        # Constrói a query para buscar o documento com o PIN correspondente
+        query = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1)
         
-        for doc in docs:
-            data = doc.to_dict()
-            data['id'] = doc.id 
+        # Executa a query usando .get(), que retorna uma lista de documentos
+        docs = query.get()
+        
+        # Se a lista de documentos estiver vazia, significa que o PIN não foi encontrado
+        if not docs:
+            return None
+        
+        # Pega o primeiro (e único) documento da lista
+        doc = docs[0]
+        data = doc.to_dict()
+        data['id'] = doc.id 
+        
+        # Converte o timestamp do Firestore para um objeto datetime do Python
+        if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
+            data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
+        
+        return data
             
-            if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
-                data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
-            
-            return data
-            
-        return None
     except Exception as e:
         print(f"ERRO NA BUSCA POR PIN: {e}")
         return None
@@ -89,7 +96,6 @@ def buscar_todos_agendamentos():
         return pd.DataFrame()
 
 
-# --- CORREÇÃO DE SINTAXE APLICADA AQUI TAMBÉM ---
 def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
     """
     Busca agendamentos por um intervalo de data/hora no Firestore.
