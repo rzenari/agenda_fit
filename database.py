@@ -3,24 +3,24 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, date, timedelta
-import json 
+import json
 from google.cloud import firestore
-from google.cloud.firestore_v1.base_query import FieldFilter # Importação para filtros de data
+from google.cloud.firestore_v1.base_query import FieldFilter
+# Importação para filtros de data
 
 # --- Inicialização da Conexão ---
 @st.cache_resource
 def get_firestore_client():
     """
-    Inicializa o cliente Firestore lendo a Service Account.
+    Inicializa o cliente Firestore lendo a Service Account dos Secrets do Streamlit.
     """
     try:
-        # Lembre-se: 'json_key_string' deve ser o nome da chave nos Secrets
+        # 'json_key_string' deve ser o nome da chave nos Secrets
         json_credenciais = st.secrets["firestore"]["json_key_string"]
         credenciais_dict = json.loads(json_credenciais)
 
         return firestore.Client.from_service_account_info(credenciais_dict)
     except Exception as e:
-        # O erro 'invalid_grant' é capturado aqui.
         st.error(f"Erro ao conectar ao Google Firestore. Falha na credencial ou permissão. Detalhe: {e}")
         st.stop()
 
@@ -48,22 +48,21 @@ def salvar_agendamento(dados: dict, pin_code: str):
         db.collection(COLECAO_AGENDAMENTOS).add(data_para_salvar)
         return True # Sucesso
     except Exception as e:
-        return str(e) # Retorna a mensagem de erro
-
+        return f"Erro de DB: {e}" # Retorna a mensagem de erro
 
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN (Query NoSQL)."""
     try:
         # Query: SELECT * FROM agendamentos WHERE pin_code = pin_code
-        docs = db.collection(COLECAO_AGENDAMENTOS).where('pin_code', '==', str(pin_code)).limit(1).stream()
+        docs = db.collection(COLECAO_AGENDAMENTOS).where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1).stream()
         
         for doc in docs:
             data = doc.to_dict()
             data['id'] = doc.id 
             
-            if 'horario' in data:
-                 # Converte o timestamp para datetime Python Naive (sem fuso)
-                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
+            if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
+                # Converte o timestamp para datetime Python Naive (sem fuso)
+                data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             
             return data
             
@@ -80,10 +79,12 @@ def buscar_todos_agendamentos():
         for doc in docs:
             item = doc.to_dict()
             item['id'] = doc.id
-            if 'horario' in item:
+            if 'horario' in item and hasattr(item['horario'], 'to_datetime'):
                 item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
             data.append(item)
             
+        if not data:
+            return pd.DataFrame()
         return pd.DataFrame(data).sort_values(by='horario')
     except Exception as e:
         print(f"ERRO NA BUSCA TOTAL: {e}")
@@ -108,7 +109,7 @@ def buscar_agendamentos_por_intervalo(start_dt: datetime, end_dt: datetime):
         for doc in docs:
             item = doc.to_dict()
             item['id'] = doc.id
-            if 'horario' in item:
+            if 'horario' in item and hasattr(item['horario'], 'to_datetime'):
                 # Converte o timestamp para datetime Python Naive (sem fuso)
                 item['horario'] = item['horario'].to_datetime().replace(tzinfo=None)
             data.append(item)
@@ -136,8 +137,8 @@ def buscar_agendamento_por_id(id_agendamento: str):
         if doc.exists:
             data = doc.to_dict()
             data['id'] = doc.id
-            if 'horario' in data:
-                 data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
+            if 'horario' in data and hasattr(data['horario'], 'to_datetime'):
+                data['horario'] = data['horario'].to_datetime().replace(tzinfo=None)
             return data
     except Exception as e:
         print(f"ERRO NA BUSCA POR ID: {e}")
