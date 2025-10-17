@@ -48,7 +48,8 @@ if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
 if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
 if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
 if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
-if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None # Controla qual profissional está sendo editado
+if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None 
+if 'active_tab' not in st.session_state: st.session_state.active_tab = "Agenda e Agendamento" # Para manter a aba ativa
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -66,7 +67,7 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id']
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -74,6 +75,7 @@ def handle_logout():
 
 def handle_add_profissional():
     """Adiciona um novo profissional para a clínica logada."""
+    st.session_state.active_tab = "Gerenciar Profissionais"
     nome_profissional = st.session_state.nome_novo_profissional
     if nome_profissional:
         if adicionar_profissional(st.session_state.clinic_id, nome_profissional):
@@ -86,6 +88,7 @@ def handle_add_profissional():
 
 def handle_agendamento_submission():
     """Lida com a criação de um novo agendamento pelo admin da clínica."""
+    st.session_state.active_tab = "Agenda e Agendamento"
     clinic_id = st.session_state.clinic_id
     cliente = st.session_state.c_nome_input
     profissional = st.session_state.c_prof_input
@@ -125,6 +128,7 @@ def handle_agendamento_submission():
 
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
+    st.session_state.active_tab = "Configurações da Clínica"
     if not prof_id:
         st.error("Nenhum profissional selecionado.")
         return
@@ -145,6 +149,7 @@ def handle_salvar_horarios_profissional(prof_id):
 
 def handle_adicionar_feriado():
     """Adiciona um novo feriado ou folga para a clínica."""
+    st.session_state.active_tab = "Configurações da Clínica"
     data = st.session_state.nova_data_feriado
     descricao = st.session_state.descricao_feriado
     if data and descricao:
@@ -157,6 +162,7 @@ def handle_adicionar_feriado():
 
 def handle_importar_feriados():
     """Importa feriados nacionais para a clínica."""
+    st.session_state.active_tab = "Configurações da Clínica"
     ano = st.session_state.ano_importacao
     count = importar_feriados_nacionais(st.session_state.clinic_id, ano)
     if count > 0:
@@ -164,7 +170,6 @@ def handle_importar_feriados():
     else:
         st.warning(f"Não foi possível importar feriados para {ano}. Verifique se já não foram importados.")
 
-# (As demais funções handle, como remarcação, cancelamento, etc., permanecem as mesmas)
 def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
     nova_data = st.session_state.nova_data_remarcacao
     nova_hora = st.session_state.nova_hora_remarcacao
@@ -177,6 +182,7 @@ def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
     st.rerun()
 
 def handle_cancelar_selecionados():
+    st.session_state.active_tab = "Agenda e Agendamento"
     ids_para_cancelar = [ag_id for ag_id, selecionado in st.session_state.agendamentos_selecionados.items() if selecionado]
     if not ids_para_cancelar:
         st.warning("Nenhum agendamento selecionado.")
@@ -190,6 +196,7 @@ def handle_cancelar_selecionados():
     st.rerun()
 
 def handle_admin_action(id_agendamento: str, acao: str):
+    st.session_state.active_tab = "Agenda e Agendamento"
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
         st.rerun()
@@ -200,7 +207,6 @@ def handle_admin_action(id_agendamento: str, acao: str):
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
 
 def render_login_page():
-    """Renderiza a tela de login."""
     st.title("Bem-vindo ao Agenda Fit!")
     st.write("Faça login para gerenciar sua clínica.")
     with st.form("login_form"):
@@ -209,8 +215,6 @@ def render_login_page():
         st.form_submit_button("Entrar", on_click=handle_login, use_container_width=True)
 
 def render_agendamento_seguro():
-    """Renderiza a página de gestão do cliente (acessada via PIN)."""
-    # (Esta função permanece a mesma da versão anterior, sem alterações necessárias)
     st.title("🔒 Gestão do seu Agendamento")
     if st.session_state.remarcacao_status:
         status = st.session_state.remarcacao_status
@@ -256,7 +260,6 @@ def render_agendamento_seguro():
             st.rerun()
 
 def render_backoffice_clinica():
-    """Renderiza a interface da clínica logada."""
     clinic_id = st.session_state.clinic_id
     
     st.sidebar.header(f"Clínica: {st.session_state.clinic_name}")
@@ -265,11 +268,19 @@ def render_backoffice_clinica():
     profissionais_clinica = listar_profissionais(clinic_id)
     nomes_profissionais = [p['nome'] for p in profissionais_clinica]
 
-    # Alteração: Adicionada nova aba de Configurações
-    tab1, tab2, tab3, tab4 = st.tabs(["Agenda e Agendamento", "Gerenciar Profissionais", "Configurações da Clínica", "Relatórios"])
+    # --- NOVO SISTEMA DE ABAS QUE MANTÉM O ESTADO ---
+    tab_options = ["Agenda e Agendamento", "Gerenciar Profissionais", "Configurações da Clínica", "Relatórios"]
+    
+    # A seleção do radio button atualiza o session_state automaticamente
+    active_tab = st.radio(
+        "Navegação Principal", 
+        tab_options, 
+        key="active_tab", 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
 
-    with tab1:
-        # Conteúdo da aba de agendamento (permanece o mesmo da versão anterior)
+    if active_tab == "Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
         if not nomes_profissionais:
             st.warning("Nenhum profissional cadastrado. Adicione profissionais na aba 'Gerenciar Profissionais' para poder agendar.")
@@ -313,8 +324,7 @@ def render_backoffice_clinica():
         else:
             st.info(f"Nenhuma consulta confirmada para {data_selecionada.strftime('%d/%m/%Y')}.")
 
-    with tab2:
-        # Conteúdo da aba de profissionais (permanece o mesmo da versão anterior)
+    elif active_tab == "Gerenciar Profissionais":
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
@@ -329,11 +339,9 @@ def render_backoffice_clinica():
         else:
             st.info("Nenhum profissional cadastrado.")
 
-    with tab3:
-        # --- PAINEL DE CONFIGURAÇÕES MELHORADO ---
+    elif active_tab == "Configurações da Clínica":
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
-
         if not profissionais_clinica:
             st.info("Cadastre profissionais na aba 'Gerenciar Profissionais' para definir seus horários.")
         else:
@@ -344,8 +352,6 @@ def render_backoffice_clinica():
                 prof_id = prof_dict[prof_selecionado_nome]
                 prof_data = next((p for p in profissionais_clinica if p['id'] == prof_id), None)
                 horarios_salvos = prof_data.get('horario_trabalho', {})
-
-                # MODO DE EDIÇÃO
                 if st.session_state.editando_horario_id == prof_id:
                     with st.form(key=f"form_horarios_{prof_id}"):
                         st.write(f"**Editando horários para: {prof_selecionado_nome}**")
@@ -361,8 +367,6 @@ def render_backoffice_clinica():
                         if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
                             st.session_state.editando_horario_id = None
                             st.rerun()
-
-                # MODO DE VISUALIZAÇÃO
                 else:
                     st.write(f"**Horários salvos para: {prof_selecionado_nome}**")
                     for dia_key, dia_nome in DIAS_SEMANA.items():
@@ -374,11 +378,10 @@ def render_backoffice_clinica():
                     
                     if st.button("✏️ Editar Horários", key=f"edit_{prof_id}"):
                         st.session_state.editando_horario_id = prof_id
+                        st.session_state.active_tab = "Configurações da Clínica"
                         st.rerun()
-
         st.markdown("---")
         st.subheader("Feriados e Folgas")
-        
         col1, col2 = st.columns(2)
         with col1:
             with st.form("add_feriado_form"):
@@ -389,7 +392,6 @@ def render_backoffice_clinica():
             st.write("Importar Feriados Nacionais (Brasil)")
             st.number_input("Ano", min_value=datetime.now().year, max_value=datetime.now().year + 5, key="ano_importacao", label_visibility="collapsed")
             st.button("Importar Feriados do Ano", on_click=handle_importar_feriados)
-
         feriados = listar_feriados(clinic_id)
         if feriados:
             st.write("Datas bloqueadas cadastradas:")
@@ -399,8 +401,7 @@ def render_backoffice_clinica():
                 c2.write(feriado['descricao'])
                 c3.button("Remover", key=f"del_feriado_{feriado['id']}", on_click=remover_feriado, args=(clinic_id, feriado['id']))
 
-    with tab4:
-        # Conteúdo da aba de relatórios (permanece o mesmo da versão anterior)
+    elif active_tab == "Relatórios":
         st.header("📈 Relatórios de Faltas (No-Show)")
         df_relatorio = get_relatorio_no_show(clinic_id)
         if not df_relatorio.empty:
@@ -410,7 +411,6 @@ def render_backoffice_clinica():
 
 # --- ROTEAMENTO PRINCIPAL ---
 pin_param = st.query_params.get("pin")
-
 if pin_param:
     render_agendamento_seguro()
 elif st.session_state.clinic_id:
