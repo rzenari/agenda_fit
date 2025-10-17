@@ -102,20 +102,6 @@ def handle_add_profissional():
     else:
         st.warning("O nome do profissional não pode estar em branco.")
 
-def handle_selecao_cliente():
-    """Atualiza o telefone quando um cliente é selecionado no agendamento."""
-    cliente_selecionado = st.session_state.c_nome_input
-    if cliente_selecionado and cliente_selecionado != "Novo Cliente":
-        clientes = listar_clientes(st.session_state.clinic_id)
-        cliente_data = next((c for c in clientes if c['nome'] == cliente_selecionado), None)
-        if cliente_data:
-            st.session_state.cliente_selecionado_telefone = cliente_data.get('telefone', '')
-        else:
-            st.session_state.cliente_selecionado_telefone = ''
-    else:
-        st.session_state.cliente_selecionado_telefone = ''
-
-
 def handle_agendamento_submission():
     """Lida com a criação de um novo agendamento, lendo dos seletores e do form."""
     clinic_id = st.session_state.clinic_id
@@ -418,6 +404,17 @@ def render_backoffice_clinica():
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
 
+            # --- CORREÇÃO: LÓGICA PARA ATUALIZAR TELEFONE DO CLIENTE (MOVIDA PARA FORA DO FORM) ---
+            cliente_selecionado_agora = st.session_state.get("c_nome_input")
+            if cliente_selecionado_agora and cliente_selecionado_agora != "Novo Cliente":
+                cliente_data = next((c for c in clientes_clinica if c['nome'] == cliente_selecionado_agora), None)
+                if cliente_data:
+                    st.session_state.cliente_selecionado_telefone = cliente_data.get('telefone', '')
+                else:
+                    st.session_state.cliente_selecionado_telefone = '' 
+            else:
+                 st.session_state.cliente_selecionado_telefone = ''
+
             with st.form("admin_form"):
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
@@ -434,7 +431,8 @@ def render_backoffice_clinica():
                     pode_agendar = False
                 
                 opcoes_clientes = ["Novo Cliente"] + [c['nome'] for c in clientes_clinica]
-                form_cols[0].selectbox("Cliente:", options=opcoes_clientes, key="c_nome_input", on_change=handle_selecao_cliente)
+                # CORREÇÃO: Removido o on_change para evitar o erro do Streamlit
+                form_cols[0].selectbox("Cliente:", options=opcoes_clientes, key="c_nome_input")
 
                 if st.session_state.c_nome_input == "Novo Cliente":
                     form_cols[0].text_input("Nome do Novo Cliente:", key="c_nome_novo_cliente_input")
