@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM PAINEL DE SUPER ADMINISTRADOR)
+# app.py (VERSÃO COM GESTÃO DE TURMAS E PAINEL SUPER ADMIN)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -26,6 +26,10 @@ from database import (
     listar_servicos,
     adicionar_servico,
     remover_servico as db_remover_servico,
+    # Funções de Turmas
+    adicionar_turma,
+    listar_turmas,
+    remover_turma as db_remover_turma,
     # Funções para o Super Admin
     listar_clinicas,
     adicionar_clinica,
@@ -40,6 +44,8 @@ from logica_negocio import (
     processar_remarcacao,
     importar_feriados_nacionais,
     gerar_horarios_disponiveis,
+    # Função para Turmas
+    gerar_turmas_disponiveis,
     get_dados_dashboard,
     gerar_visao_semanal,
     gerar_visao_comparativa
@@ -49,6 +55,7 @@ from logica_negocio import (
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 DIAS_SEMANA = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta", "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
+DIAS_SEMANA_MAP_REV = {v: k for k, v in DIAS_SEMANA.items()}
 DIAS_SEMANA_LISTA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 
 
@@ -72,9 +79,7 @@ if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_clie
 if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
 if 'confirmando_agendamento' not in st.session_state: st.session_state.confirmando_agendamento = False
 if 'detalhes_agendamento' not in st.session_state: st.session_state.detalhes_agendamento = {}
-# Novo estado para Super Admin
 if 'is_super_admin' not in st.session_state: st.session_state.is_super_admin = False
-
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
 
@@ -84,15 +89,12 @@ def sync_dates_from_filter():
 
 def handle_login():
     """Tenta autenticar a clínica ou o super admin."""
-    # CORREÇÃO: Usar .strip() para remover espaços em branco do input do usuário
     username = st.session_state.login_username.strip()
     password = st.session_state.login_password.strip()
 
-    # 1. Verificar se é o Super Admin (usando st.secrets)
     super_admin_user = st.secrets.get("super_admin", {}).get("username")
     super_admin_pass = st.secrets.get("super_admin", {}).get("password")
 
-    # CORREÇÃO: Usar .strip() nos segredos também, garantindo que não sejam nulos antes
     if super_admin_user:
         super_admin_user = super_admin_user.strip()
     if super_admin_pass:
@@ -100,16 +102,15 @@ def handle_login():
         
     if username == super_admin_user and password == super_admin_pass and super_admin_user is not None:
         st.session_state.is_super_admin = True
-        st.session_state.clinic_id = None # Limpa qualquer ID de clínica
+        st.session_state.clinic_id = None
         st.rerun()
         return
 
-    # 2. Se não for admin, busca a clínica
     clinica = buscar_clinica_por_login(username, password)
     if clinica:
         st.session_state.clinic_id = clinica['id']
         st.session_state.clinic_name = clinica.get('nome_fantasia', username)
-        st.session_state.is_super_admin = False # Garante que não é admin
+        st.session_state.is_super_admin = False
         st.rerun()
     else:
         st.error("Usuário ou senha inválidos.")
@@ -121,7 +122,7 @@ def handle_logout():
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
-
+    
 def handle_add_clinica():
     """Lida com a adição de uma nova clínica pelo Super Admin."""
     nome = st.session_state.sa_nome_clinica
@@ -145,7 +146,7 @@ def handle_toggle_status_clinica(clinic_id, status_atual):
         st.rerun()
     else:
         st.error("Erro ao alterar o status da clínica.")
-# ... (restante das funções handle_... existentes, sem alterações) ...
+
 def handle_add_profissional():
     """Adiciona um novo profissional para a clínica logada."""
     nome_profissional = st.session_state.nome_novo_profissional
@@ -181,21 +182,48 @@ def handle_pre_agendamento():
         cliente = cliente_selecionado
         telefone = st.session_state.get('c_tel_input', '')
     
-    hora_consulta = st.session_state.get('c_hora_input')
-    if not cliente or not telefone or not isinstance(hora_consulta, time):
-        st.warning("Por favor, preencha o nome do cliente, telefone e selecione um horário válido.")
+    servico_nome = st.session_state.c_servico_input
+    servicos_clinica = listar_servicos(st.session_state.clinic_id)
+    servico_obj = next((s for s in servicos_clinica if s['nome'] == servico_nome), None)
+
+    if not servico_obj:
+        st.error("Serviço não encontrado.")
         return
+
+    is_turma = servico_obj.get('tipo', 'Individual') == 'Em Grupo'
+    
+    hora_consulta_raw = st.session_state.get('c_hora_input')
+    
+    if not cliente or not telefone or not hora_consulta_raw:
+        st.warning("Por favor, preencha o nome do cliente, telefone e selecione um horário/turma válido.")
+        return
+
+    # Extrai os detalhes da turma ou o horário individual
+    turma_id = None
+    if is_turma:
+        # O valor do selectbox de turma é uma tupla: (turma_id, time_obj)
+        if isinstance(hora_consulta_raw, tuple) and len(hora_consulta_raw) == 2:
+            turma_id, hora_consulta = hora_consulta_raw
+        else:
+             st.warning("Seleção de turma inválida.")
+             return
+    else:
+        if isinstance(hora_consulta_raw, time):
+            hora_consulta = hora_consulta_raw
+        else:
+            st.warning("Seleção de horário inválida.")
+            return
 
     st.session_state.detalhes_agendamento = {
         'cliente': cliente,
         'telefone': telefone,
         'profissional': st.session_state.c_prof_input,
-        'servico': st.session_state.c_servico_input,
-        'data': st.session_state.form_data_selecionada, # Usar estado do formulário
+        'servico': servico_nome,
+        'data': st.session_state.form_data_selecionada,
         'hora': hora_consulta,
-        'cliente_era_novo': cliente_selecionado == "Novo Cliente"
+        'cliente_era_novo': cliente_selecionado == "Novo Cliente",
+        'turma_id': turma_id
     }
-    # Sincroniza a data do filtro com a data do formulário
     st.session_state.filter_data_selecionada = st.session_state.form_data_selecionada
     st.session_state.confirmando_agendamento = True
     st.rerun()
@@ -214,7 +242,11 @@ def handle_agendamento_submission():
     dt_consulta_naive = datetime.combine(detalhes['data'], detalhes['hora'])
     dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
     
-    disponivel, msg_disponibilidade = verificar_disponibilidade_com_duracao(clinic_id, detalhes['profissional'], dt_consulta_local, duracao_servico)
+    # Se não for turma, verifica disponibilidade individual. Para turma, a vaga já foi validada.
+    disponivel = True
+    msg_disponibilidade = ""
+    if not detalhes['turma_id']:
+        disponivel, msg_disponibilidade = verificar_disponibilidade_com_duracao(clinic_id, detalhes['profissional'], dt_consulta_local, duracao_servico)
 
     if disponivel:
         pin_code = gerar_token_unico()
@@ -224,7 +256,8 @@ def handle_agendamento_submission():
             'telefone': detalhes['telefone'],
             'horario': dt_consulta_local,
             'servico_nome': detalhes['servico'],
-            'duracao_min': duracao_servico
+            'duracao_min': duracao_servico,
+            'turma_id': detalhes.get('turma_id') # Adiciona o ID da turma se houver
         }
         resultado = salvar_agendamento(clinic_id, dados, pin_code)
 
@@ -234,7 +267,6 @@ def handle_agendamento_submission():
 
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
-            # Sincroniza ambas as datas para a data do agendamento
             st.session_state.form_data_selecionada = detalhes['data']
             st.session_state.filter_data_selecionada = detalhes['data']
         else:
@@ -242,13 +274,12 @@ def handle_agendamento_submission():
     else:
         st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'status': msg_disponibilidade}
     
-    # Limpa o estado após o agendamento
     st.session_state.agenda_cliente_select = "Novo Cliente"
     st.session_state.c_tel_input = ""
     st.session_state.confirmando_agendamento = False
     st.session_state.detalhes_agendamento = {}
     st.rerun()
-
+    
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
     if not prof_id:
@@ -343,14 +374,45 @@ def handle_add_cliente():
 def handle_add_servico():
     nome = st.session_state.nome_novo_servico
     duracao = st.session_state.duracao_novo_servico
+    tipo = st.session_state.tipo_novo_servico
     if nome and duracao > 0:
-        if adicionar_servico(st.session_state.clinic_id, nome, duracao):
+        if adicionar_servico(st.session_state.clinic_id, nome, duracao, tipo):
             st.success(f"Serviço '{nome}' adicionado com sucesso!")
             st.rerun()
         else:
             st.error("Erro ao adicionar serviço.")
     else:
         st.warning("Nome do serviço e duração maior que zero são obrigatórios.")
+
+def handle_add_turma():
+    clinic_id = st.session_state.clinic_id
+    nome = st.session_state.get("turma_nome")
+    servico_id = st.session_state.get("turma_servico")
+    profissional_id = st.session_state.get("turma_profissional")
+    capacidade = st.session_state.get("turma_capacidade")
+    dias_semana_nomes = st.session_state.get("turma_dias_semana")
+    horario = st.session_state.get("turma_horario")
+
+    if not all([nome, servico_id, profissional_id, capacidade, dias_semana_nomes, horario]):
+        st.warning("Todos os campos são obrigatórios para criar a turma.")
+        return
+    
+    dias_semana_keys = [DIAS_SEMANA_MAP_REV[dia] for dia in dias_semana_nomes]
+    
+    dados_turma = {
+        "nome": nome,
+        "servico_id": servico_id,
+        "profissional_id": profissional_id,
+        "capacidade_maxima": capacidade,
+        "dias_semana": dias_semana_keys,
+        "horario": horario.strftime("%H:%M")
+    }
+    
+    if adicionar_turma(clinic_id, dados_turma):
+        st.success(f"Turma '{nome}' criada com sucesso!")
+        st.rerun()
+    else:
+        st.error("Ocorreu um erro ao criar a turma.")
 
 def handle_remove_profissional(clinic_id: str, prof_id: str):
     if db_remover_profissional(clinic_id, prof_id):
@@ -379,6 +441,13 @@ def handle_remove_feriado(clinic_id: str, feriado_id: str):
     else:
         st.error("Erro ao remover feriado.")
 
+def handle_remove_turma(clinic_id: str, turma_id: str):
+    if db_remover_turma(clinic_id, turma_id):
+        st.success("Turma removida com sucesso!")
+        st.rerun()
+    else:
+        st.error("Erro ao remover turma.")
+        
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
 
 def render_login_page():
@@ -390,7 +459,6 @@ def render_login_page():
         st.form_submit_button("Entrar", on_click=handle_login)
 
 def render_agendamento_seguro():
-    # ... (código da página de gestão de agendamento do cliente, sem alterações) ...
     st.title("🔒 Gestão do seu Agendamento")
     if st.session_state.remarcacao_status:
         status = st.session_state.remarcacao_status
@@ -399,21 +467,30 @@ def render_agendamento_seguro():
         else:
             st.error(status['mensagem'])
         st.session_state.remarcacao_status = None
+    
     pin = st.query_params.get("pin")
     if not pin:
         st.error("Link inválido ou PIN não fornecido.")
         return
+        
     agendamento = buscar_agendamento_por_pin(pin)
     if not agendamento:
         st.error("PIN de agendamento inválido ou expirado.")
         return
+        
+    if agendamento.get('turma_id'):
+        st.info("Agendamentos de turmas não podem ser remarcados ou cancelados individualmente por este link.")
+        return
+        
     if agendamento['status'] != "Confirmado":
         st.warning(f"Este agendamento já se encontra com o status: **{agendamento['status']}**.")
         return
+
     st.info(f"Seu agendamento com **{agendamento['profissional_nome']}** está CONFIRMADO para:")
     st.subheader(f"{agendamento['horario'].strftime('%d/%m/%Y')} às {agendamento['horario'].strftime('%H:%M')}")
     st.caption(f"Cliente: {agendamento['cliente']}")
     st.markdown("---")
+
     if st.session_state.remarcando:
         st.subheader("Selecione o novo horário")
         nova_data = st.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
@@ -455,7 +532,6 @@ def render_agendamento_seguro():
             st.rerun()
 
 def render_backoffice_clinica():
-    # ... (código do backoffice da clínica, sem alterações funcionais) ...
     clinic_id = st.session_state.clinic_id
     
     st.sidebar.header(f"Clínica: {st.session_state.clinic_name}")
@@ -465,8 +541,9 @@ def render_backoffice_clinica():
     profissionais_clinica = listar_profissionais(clinic_id)
     clientes_clinica = listar_clientes(clinic_id)
     servicos_clinica = listar_servicos(clinic_id)
+    turmas_clinica = listar_turmas(clinic_id, profissionais_clinica, servicos_clinica)
 
-    tab_options = ["🗓️ Agenda e Agendamento", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
+    tab_options = ["🗓️ Agenda e Agendamento", "📅 Gerenciar Turmas", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
     
     active_tab = st.radio(
         "Navegação", 
@@ -479,7 +556,6 @@ def render_backoffice_clinica():
     if active_tab == "🗓️ Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
 
-        # --- LÓGICA DE CONFIRMAÇÃO (SEM st.dialog) ---
         if st.session_state.get('confirmando_agendamento', False):
             st.subheader("Revisar e Confirmar Agendamento")
             detalhes = st.session_state.detalhes_agendamento
@@ -489,6 +565,8 @@ def render_backoffice_clinica():
             st.write(f"**Serviço:** {detalhes['servico']}")
             st.write(f"**Data:** {detalhes['data'].strftime('%d/%m/%Y')}")
             st.write(f"**Horário:** {detalhes['hora'].strftime('%H:%M')}")
+            if detalhes.get('turma_id'):
+                st.write(f"**Modalidade:** Em Grupo / Turma")
             
             c1, c2 = st.columns(2)
             if c1.button("✅ Confirmar Agendamento", type="primary"):
@@ -511,17 +589,9 @@ def render_backoffice_clinica():
 
             st.subheader("1. Selecione o Cliente")
             opcoes_clientes = ["Novo Cliente"] + [c['nome'] for c in clientes_clinica]
-            st.selectbox(
-                "Cliente:",
-                options=opcoes_clientes,
-                key="agenda_cliente_select",
-                on_change=handle_selecao_cliente
-            )
+            st.selectbox("Cliente:", options=opcoes_clientes, key="agenda_cliente_select", on_change=handle_selecao_cliente)
 
             st.subheader("2. Preencha os Detalhes do Agendamento")
-            
-            # CORREÇÃO: Removido o st.form para permitir a atualização dinâmica dos horários.
-            # Agora, cada alteração nos widgets abaixo irá re-executar o script e atualizar a lista de horários.
             
             if st.session_state.agenda_cliente_select == "Novo Cliente":
                 col_nome, col_tel = st.columns(2)
@@ -534,30 +604,62 @@ def render_backoffice_clinica():
             st.divider()
 
             form_cols = st.columns(3)
-            form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
             form_cols[1].date_input("Data:", key="form_data_selecionada", min_value=date.today())
-            form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
-
-            servico_selecionado_nome = st.session_state.c_servico_input
+            servico_selecionado_nome = form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
+            
             servico_data = next((s for s in servicos_clinica if s['nome'] == servico_selecionado_nome), None)
-            duracao_servico = servico_data['duracao_min'] if servico_data else 30
+            
+            if servico_data:
+                tipo_servico = servico_data.get('tipo', 'Individual')
+                duracao_servico = servico_data['duracao_min']
+                
+                # Lógica para exibir profissional ou turma
+                if tipo_servico == 'Em Grupo':
+                    form_cols[0].selectbox("Profissional:", ["-- (Definido pela Turma) --"], key="c_prof_input", disabled=True)
+                    
+                    turmas_disponiveis = gerar_turmas_disponiveis(
+                        clinic_id, 
+                        st.session_state.form_data_selecionada, 
+                        turmas_clinica,
+                    )
+                    
+                    if turmas_disponiveis:
+                        # Formata as opções para exibição
+                        opcoes_turmas = {f"{t['horario_str']} - {t['nome']} ({t['profissional_nome']}) - {t['vagas_ocupadas']}/{t['capacidade_maxima']} vagas": (t['id'], t['horario_obj']) for t in turmas_disponiveis if t['vagas_disponiveis'] > 0}
+                        
+                        if opcoes_turmas:
+                            selecao = form_cols[1].selectbox("Turma:", options=opcoes_turmas.keys(), key="c_hora_input_raw")
+                            st.session_state.c_hora_input = opcoes_turmas[selecao] # Salva (turma_id, time_obj)
+                            # Atualiza o profissional baseado na turma
+                            turma_id_selecionado = opcoes_turmas[selecao][0]
+                            turma_selecionada_obj = next((t for t in turmas_clinica if t['id'] == turma_id_selecionado), None)
+                            if turma_selecionada_obj:
+                                st.session_state.c_prof_input = turma_selecionada_obj.get('profissional_nome', 'N/A')
+                            pode_agendar = True
+                        else:
+                            form_cols[1].selectbox("Turma:", options=["Nenhuma turma com vagas disponíveis"], key="c_hora_input", disabled=True)
+                            pode_agendar = False
 
-            horarios_disponiveis = gerar_horarios_disponiveis(
-                clinic_id, 
-                st.session_state.c_prof_input, 
-                st.session_state.form_data_selecionada, # Usar estado do formulário
-                duracao_servico
-            )
-            
-            if horarios_disponiveis:
-                form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
-                pode_agendar = True
-            else:
-                form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
-                pode_agendar = False
-            
-            # CORREÇÃO: Trocado st.form_submit_button por st.button
-            st.button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
+                    else:
+                        form_cols[1].selectbox("Turma:", options=["Nenhuma turma disponível para este dia"], key="c_hora_input", disabled=True)
+                        pode_agendar = False
+
+                else: # Individual
+                    form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
+                    horarios_disponiveis = gerar_horarios_disponiveis(
+                        clinic_id, 
+                        st.session_state.c_prof_input, 
+                        st.session_state.form_data_selecionada,
+                        duracao_servico
+                    )
+                    if horarios_disponiveis:
+                        form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
+                        pode_agendar = True
+                    else:
+                        form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
+                        pode_agendar = False
+                
+                st.button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
 
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
@@ -565,53 +667,81 @@ def render_backoffice_clinica():
         view_tab1, view_tab2, view_tab3 = st.tabs(["Visão Diária (Lista)", "Visão Semanal (Profissional)", "Visão Comparativa (Diária)"])
 
         with view_tab1:
-            # CORREÇÃO: Usar chave única e callback para sincronizar
             st.date_input("Filtrar por data:", key='filter_data_selecionada', format="DD/MM/YYYY", on_change=sync_dates_from_filter)
             agenda_do_dia = buscar_agendamentos_por_data(clinic_id, st.session_state.filter_data_selecionada)
-            
+
             if not agenda_do_dia.empty:
-                header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
-                header_cols[1].markdown("**Cliente / Serviço**")
-                header_cols[2].markdown("**Profissional / Horário**")
-                header_cols[3].markdown("**Ações**")
-                st.divider()
+                # Agrupa por turma e horário para exibir corretamente
+                turmas_na_agenda = {}
+                agendamentos_individuais = []
 
-                for index, row in agenda_do_dia.iterrows():
-                    ag_id = row['id']
-                    data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
-                    
-                    selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
-                    st.session_state.agendamentos_selecionados[ag_id] = selecionado
-                    
-                    data_cols[1].write(f"**{row['cliente']}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
-                    data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
-                    
-                    with data_cols[3]:
-                        action_cols = st.columns(5)
-                        detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
-                        with detalhes_popover:
-                            pin = row.get('pin_code', 'N/A')
-                            link = f"https://agendafit.streamlit.app?pin={pin}"
-                            st.markdown(f"**Serviço:** {row.get('servico_nome', 'N/A')}")
-                            st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
-                            st.markdown(f"**PIN:** `{pin}`")
-                            st.markdown(f"**Link:** `{link}`")
-                        wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
-                        with wpp_popover:
-                            pin = row.get('pin_code', 'N/A')
-                            link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
-                            mensagem = (
-                                f"Olá, {row['cliente']}! Tudo bem?\n\n"
-                                f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row['profissional_nome']} "
-                                f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
-                                f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
-                            )
-                            st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
-                            st.write("Copie a mensagem acima e envie para o cliente.")
+                for _, row in agenda_do_dia.iterrows():
+                    if pd.notna(row.get('turma_id')):
+                        turma_id = row['turma_id']
+                        horario_key = row['horario'].strftime('%H:%M')
+                        key = (turma_id, horario_key)
+                        if key not in turmas_na_agenda:
+                            turma_info = next((t for t in turmas_clinica if t['id'] == turma_id), None)
+                            turmas_na_agenda[key] = {
+                                'nome_turma': turma_info['nome'] if turma_info else 'Turma Removida',
+                                'profissional_nome': turma_info['profissional_nome'] if turma_info else 'N/A',
+                                'horario': row['horario'],
+                                'capacidade': turma_info['capacidade_maxima'] if turma_info else 'N/A',
+                                'clientes': []
+                            }
+                        turmas_na_agenda[key]['clientes'].append(row)
+                    else:
+                        agendamentos_individuais.append(row)
+                
+                # Renderiza Turmas
+                if turmas_na_agenda:
+                    st.subheader("Aulas em Grupo")
+                    for (turma_id, _), turma_data in sorted(turmas_na_agenda.items(), key=lambda item: item[1]['horario']):
+                        expander_title = f"{turma_data['horario'].strftime('%H:%M')} - {turma_data['nome_turma']} ({turma_data['profissional_nome']}) - {len(turma_data['clientes'])}/{turma_data['capacidade']} vagas"
+                        with st.expander(expander_title):
+                            for cliente_row in turma_data['clientes']:
+                                st.write(f" - {cliente_row['cliente']} (Tel: {cliente_row.get('telefone', 'N/A')})")
+                    st.divider()
 
-                        action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                        action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                        action_cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                # Renderiza Individuais
+                if agendamentos_individuais:
+                    st.subheader("Atendimentos Individuais")
+                    for row in sorted(agendamentos_individuais, key=lambda r: r['horario']):
+                        ag_id = row['id']
+                        data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
+                        
+                        selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
+                        st.session_state.agendamentos_selecionados[ag_id] = selecionado
+                        
+                        data_cols[1].write(f"**{row['cliente']}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
+                        data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
+                        
+                        with data_cols[3]:
+                            action_cols = st.columns(5)
+                            detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
+                            with detalhes_popover:
+                                pin = row.get('pin_code', 'N/A')
+                                link = f"https://agendafit.streamlit.app?pin={pin}"
+                                st.markdown(f"**Serviço:** {row.get('servico_nome', 'N/A')}")
+                                st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
+                                st.markdown(f"**PIN:** `{pin}`")
+                                st.markdown(f"**Link:** `{link}`")
+                            wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
+                            with wpp_popover:
+                                pin = row.get('pin_code', 'N/A')
+                                link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
+                                mensagem = (
+                                    f"Olá, {row['cliente']}! Tudo bem?\n\n"
+                                    f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row['profissional_nome']} "
+                                    f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
+                                    f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                                )
+                                st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
+                                st.write("Copie a mensagem acima e envie para o cliente.")
+
+                            action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                            action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                            action_cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
 
                 if any(st.session_state.agendamentos_selecionados.values()):
                     st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
@@ -644,8 +774,70 @@ def render_backoffice_clinica():
                 st.dataframe(df_comparativo.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
 
+    elif active_tab == "📅 Gerenciar Turmas":
+        st.header("📅 Gerenciar Turmas")
+
+        with st.form("add_turma_form", clear_on_submit=True):
+            st.subheader("Criar Nova Turma")
+            
+            # Mapeia nomes para IDs para os selectboxes
+            servicos_map = {s['nome']: s['id'] for s in servicos_clinica if s.get('tipo') == 'Em Grupo'}
+            profissionais_map = {p['nome']: p['id'] for p in profissionais_clinica}
+
+            if not servicos_map:
+                st.warning("Para criar uma turma, primeiro cadastre um serviço do tipo 'Em Grupo' na aba 'Gerenciar Serviços'.")
+            else:
+                c1, c2 = st.columns(2)
+                c1.text_input("Nome da Turma", key="turma_nome", placeholder="Ex: Pilates Avançado")
+                c2.number_input("Capacidade Máxima", min_value=1, step=1, key="turma_capacidade")
+
+                c3, c4 = st.columns(2)
+                servico_nome_selecionado = c3.selectbox("Serviço Associado", options=servicos_map.keys())
+                st.session_state.turma_servico = servicos_map.get(servico_nome_selecionado)
+
+                prof_nome_selecionado = c4.selectbox("Profissional Responsável", options=profissionais_map.keys())
+                st.session_state.turma_profissional = profissionais_map.get(prof_nome_selecionado)
+
+                st.multiselect("Recorrência (Dias da Semana)", options=DIAS_SEMANA_LISTA, key="turma_dias_semana")
+                st.time_input("Horário de Início", key="turma_horario", step=timedelta(minutes=15), value=time(18,0))
+
+                st.form_submit_button("Criar Turma", on_click=handle_add_turma)
+
+        st.divider()
+        st.subheader("Grade de Aulas Semanal")
+        if not turmas_clinica:
+            st.info("Nenhuma turma cadastrada.")
+        else:
+            # Cria um DataFrame para a grade
+            grade = {dia: [] for dia in DIAS_SEMANA_LISTA}
+            horarios = sorted(list(set(t['horario'] for t in turmas_clinica)))
+
+            grade_df_data = {}
+            for horario in horarios:
+                linha = {}
+                for dia_nome in DIAS_SEMANA_LISTA:
+                    dia_key = DIAS_SEMANA_MAP_REV[dia_nome]
+                    turmas_no_horario = [
+                        f"{t['nome']} ({t['profissional_nome']})" 
+                        for t in turmas_clinica if t['horario'] == horario and dia_key in t['dias_semana']
+                    ]
+                    linha[dia_nome] = ", ".join(turmas_no_horario)
+                grade_df_data[horario] = linha
+            
+            if grade_df_data:
+                grade_df = pd.DataFrame.from_dict(grade_df_data, orient='index')
+                st.dataframe(grade_df, use_container_width=True)
+
+        st.divider()
+        st.subheader("Remover Turma")
+        if turmas_clinica:
+            turma_para_remover_nome = st.selectbox("Selecione uma turma para remover", options=[""] + [t['nome'] for t in turmas_clinica], key="turma_remover_select")
+            if turma_para_remover_nome:
+                turma_id_remover = next((t['id'] for t in turmas_clinica if t['nome'] == turma_para_remover_nome), None)
+                if turma_id_remover:
+                    st.button(f"Remover {turma_para_remover_nome}", type="primary", key=f"del_turma_{turma_id_remover}", on_click=handle_remove_turma, args=(clinic_id, turma_id_remover))
+        
     elif active_tab == "📈 Dashboard":
-        # ... (código do dashboard, sem alterações) ...
         st.header("📈 Dashboard de Desempenho")
         
         hoje = datetime.now(TZ_SAO_PAULO).date()
@@ -689,7 +881,6 @@ def render_backoffice_clinica():
                 df_confirmados = df_dashboard[df_dashboard['status'].isin(['Finalizado', 'Confirmado'])].copy()
                 if not df_confirmados.empty:
                     df_confirmados['dia_semana_num'] = df_confirmados['horario'].dt.weekday
-                    df_confirmados['dia_semana_nome'] = df_confirmados['horario'].dt.day_name()
                     df_confirmados['hora'] = df_confirmados['horario'].dt.hour
                     
                     heatmap_data = df_confirmados.pivot_table(index='hora', columns='dia_semana_num', values='id', aggfunc='count').fillna(0)
@@ -703,21 +894,13 @@ def render_backoffice_clinica():
                             heatmap_data[dia] = 0
                     heatmap_data = heatmap_data[ordem_dias]
 
-                    fig_heatmap = go.Figure(data=go.Heatmap(
-                        z=heatmap_data.values,
-                        x=heatmap_data.columns,
-                        y=heatmap_data.index,
-                        colorscale='Viridis'))
-                    fig_heatmap.update_layout(
-                        title='Concentração de Agendamentos por Dia e Hora',
-                        xaxis_nticks=7,
-                        yaxis_title="Hora do Dia")
+                    fig_heatmap = go.Figure(data=go.Heatmap(z=heatmap_data.values, x=heatmap_data.columns, y=heatmap_data.index, colorscale='Viridis'))
+                    fig_heatmap.update_layout(title='Concentração de Agendamentos por Dia e Hora', xaxis_nticks=7, yaxis_title="Hora do Dia")
                     st.plotly_chart(fig_heatmap, use_container_width=True)
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
 
     elif active_tab == "👤 Gerenciar Clientes":
-        # ... (código da aba de clientes, sem alterações) ...
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
             st.subheader("Cadastrar Novo Cliente")
@@ -742,29 +925,30 @@ def render_backoffice_clinica():
             st.info("Nenhum cliente cadastrado.")
 
     elif active_tab == "📋 Gerenciar Serviços":
-        # ... (código da aba de serviços, sem alterações) ...
         st.header("📋 Gerenciar Serviços")
         with st.form("add_servico_form"):
             st.subheader("Cadastrar Novo Serviço")
-            s1, s2 = st.columns(2)
+            s1, s2, s3 = st.columns(3)
             s1.text_input("Nome do Serviço", key="nome_novo_servico", placeholder="Ex: Sessão de Fisioterapia")
             s2.number_input("Duração Padrão (minutos)", min_value=15, step=15, key="duracao_novo_servico", value=30)
+            s3.selectbox("Tipo de Atendimento", options=["Individual", "Em Grupo"], key="tipo_novo_servico")
+            
             st.form_submit_button("Adicionar Serviço", on_click=handle_add_servico)
-            st.caption("A duração definida aqui impactará diretamente os horários disponíveis na agenda.")
+            st.caption("A duração e o tipo definidos aqui impactarão diretamente as opções na agenda.")
 
         st.markdown("---")
         st.subheader("Serviços Cadastrados")
         if servicos_clinica:
             for servico in servicos_clinica:
-                sc1, sc2, sc3 = st.columns([0.5, 0.3, 0.2])
+                sc1, sc2, sc3, sc4 = st.columns([0.4, 0.2, 0.2, 0.2])
                 sc1.write(servico['nome'])
-                sc2.write(f"{servico['duracao_min']} minutos")
-                sc3.button("Remover", key=f"del_serv_{servico['id']}", on_click=handle_remove_servico, args=(clinic_id, servico['id']))
+                sc2.write(f"{servico['duracao_min']} min")
+                sc3.write(f"*{servico.get('tipo', 'Individual')}*")
+                sc4.button("Remover", key=f"del_serv_{servico['id']}", on_click=handle_remove_servico, args=(clinic_id, servico['id']))
         else:
             st.info("Nenhum serviço cadastrado.")
 
     elif active_tab == "👥 Gerenciar Profissionais":
-        # ... (código da aba de profissionais, sem alterações) ...
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
@@ -781,7 +965,6 @@ def render_backoffice_clinica():
             st.info("Nenhum profissional cadastrado.")
 
     elif active_tab == "⚙️ Configurações":
-        # ... (código da aba de configurações, sem alterações) ...
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
         if not profissionais_clinica:
@@ -889,5 +1072,3 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
-
-
