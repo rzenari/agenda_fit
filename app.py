@@ -90,14 +90,16 @@ def handle_agendamento_submission():
     profissional = st.session_state.c_prof_input
     data_consulta = st.session_state.c_data_input
     cliente = st.session_state.c_nome_input
+    telefone = st.session_state.c_tel_input
     hora_consulta = st.session_state.c_hora_input
     
     if not isinstance(hora_consulta, time):
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Nenhum horário válido selecionado."}
         return
 
-    if not cliente or not profissional:
-        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Cliente e Profissional são obrigatórios."}
+    # Validação dos campos obrigatórios
+    if not cliente or not telefone:
+        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Nome do Cliente e Telefone são obrigatórios."}
         return
 
     dt_consulta_naive = datetime.combine(data_consulta, hora_consulta)
@@ -110,7 +112,7 @@ def handle_agendamento_submission():
         dados = {
             'profissional_nome': profissional,
             'cliente': cliente,
-            'telefone': st.session_state.c_tel_input,
+            'telefone': telefone,
             'horario': dt_consulta_local
         }
         resultado = salvar_agendamento(clinic_id, dados, pin_code)
