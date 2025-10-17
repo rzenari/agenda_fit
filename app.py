@@ -56,24 +56,41 @@ if db_client is None:
     st.stop()
 
 # --- INICIALIZAÇÃO DO SESSION STATE ---
-if 'remarcando' not in st.session_state: st.session_state.remarcando = False
-if 'agendamentos_selecionados' not in st.session_state: st.session_state.agendamentos_selecionados = {}
-if 'remarcacao_status' not in st.session_state: st.session_state.remarcacao_status = None
-if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
-if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
-if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
-if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
-if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None
-if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
+if 'remarcando' not in st.session_state:
+    st.session_state.remarcando = False
+if 'agendamentos_selecionados' not in st.session_state:
+    st.session_state.agendamentos_selecionados = {}
+if 'remarcacao_status' not in st.session_state:
+    st.session_state.remarcacao_status = None
+if "clinic_id" not in st.session_state:
+    st.session_state.clinic_id = None
+if "clinic_name" not in st.session_state:
+    st.session_state.clinic_name = None
+if 'data_filtro_agenda' not in st.session_state:
+    st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
+if 'last_agendamento_info' not in st.session_state:
+    st.session_state.last_agendamento_info = None
+if 'editando_horario_id' not in st.session_state:
+    st.session_state.editando_horario_id = None
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "🗓️ Agenda e Agendamento"
 # Estado para o novo fluxo de agendamento
-if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
-if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
+if 'agenda_cliente_select' not in st.session_state:
+    st.session_state.agenda_cliente_select = "Novo Cliente"
+if 'c_tel_input' not in st.session_state:
+    st.session_state.c_tel_input = ""
 # Estado para o diálogo de confirmação
-if 'confirmando_agendamento' not in st.session_state: st.session_state.confirmando_agendamento = False
-if 'detalhes_agendamento' not in st.session_state: st.session_state.detalhes_agendamento = {}
+if 'confirmando_agendamento' not in st.session_state:
+    st.session_state.confirmando_agendamento = False
+if 'detalhes_agendamento' not in st.session_state:
+    st.session_state.detalhes_agendamento = {}
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
+def sync_agenda_filter_date():
+    """Callback para sincronizar a data do filtro da agenda com a data do formulário."""
+    st.session_state.data_filtro_agenda = st.session_state.c_data_input
+
 def handle_login():
     """Tenta autenticar a clínica."""
     username = st.session_state.login_username
@@ -475,7 +492,8 @@ def render_backoffice_clinica():
 
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
-                form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
+                # CORREÇÃO: Adicionado o callback on_change para sincronizar a agenda
+                form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today(), on_change=sync_agenda_filter_date)
                 form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
 
                 servico_selecionado_nome = st.session_state.c_servico_input
@@ -535,16 +553,16 @@ def render_backoffice_clinica():
                             st.markdown(f"**Link:** `{link}`")
                         wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
                         with wpp_popover:
-                             pin = row.get('pin_code', 'N/A')
-                             link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
-                             mensagem = (
-                                 f"Olá, {row['cliente']}! Tudo bem?\n\n"
-                                 f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row['profissional_nome']} "
-                                 f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
-                                 f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
-                             )
-                             st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
-                             st.write("Copie a mensagem acima e envie para o cliente.")
+                            pin = row.get('pin_code', 'N/A')
+                            link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
+                            mensagem = (
+                                f"Olá, {row['cliente']}! Tudo bem?\n\n"
+                                f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row['profissional_nome']} "
+                                f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
+                                f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                            )
+                            st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
+                            st.write("Copie a mensagem acima e envie para o cliente.")
 
                         action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
                         action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
@@ -784,4 +802,3 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
-
