@@ -13,20 +13,20 @@ from database import (
     buscar_clinica_por_login,
     listar_profissionais,
     adicionar_profissional,
-    remover_profissional,
+    remover_profissional as db_remover_profissional,
     salvar_agendamento,
     buscar_agendamento_por_pin,
     atualizar_horario_profissional,
     adicionar_feriado,
     listar_feriados,
-    remover_feriado,
+    remover_feriado as db_remover_feriado,
     # Novas funções de Clientes e Serviços
     listar_clientes,
     adicionar_cliente,
-    remover_cliente,
+    remover_cliente as db_remover_cliente,
     listar_servicos,
     adicionar_servico,
-    remover_servico
+    remover_servico as db_remover_servico
 )
 from logica_negocio import (
     gerar_token_unico,
@@ -96,6 +96,7 @@ def handle_add_profissional():
         if adicionar_profissional(st.session_state.clinic_id, nome_profissional):
             st.success(f"Profissional '{nome_profissional}' adicionado com sucesso!")
             st.session_state.nome_novo_profissional = ""
+            st.rerun() # Força a atualização da lista
         else:
             st.error("Erro ao adicionar profissional.")
     else:
@@ -201,6 +202,7 @@ def handle_adicionar_feriado():
             st.success(f"Feriado '{descricao}' em {data.strftime('%d/%m/%Y')} adicionado.")
             st.session_state.nova_data_feriado = datetime.now(TZ_SAO_PAULO).date()
             st.session_state.descricao_feriado = ""
+            st.rerun()
         else:
             st.error("Erro ao adicionar feriado.")
     else:
@@ -260,6 +262,7 @@ def handle_add_cliente():
             st.session_state.nome_novo_cliente = ""
             st.session_state.tel_novo_cliente = ""
             st.session_state.obs_novo_cliente = ""
+            st.rerun() # Força a atualização da lista
         else:
             st.error("Erro ao adicionar cliente.")
     else:
@@ -273,10 +276,40 @@ def handle_add_servico():
             st.success(f"Serviço '{nome}' adicionado com sucesso!")
             st.session_state.nome_novo_servico = ""
             st.session_state.duracao_novo_servico = 30
+            st.rerun() # Força a atualização da lista
         else:
             st.error("Erro ao adicionar serviço.")
     else:
         st.warning("Nome do serviço e duração maior que zero são obrigatórios.")
+
+# --- NOVAS FUNÇÕES HANDLER PARA REMOÇÃO ---
+def handle_remove_profissional(clinic_id: str, prof_id: str):
+    if db_remover_profissional(clinic_id, prof_id):
+        st.success("Profissional removido com sucesso!")
+        st.rerun()
+    else:
+        st.error("Erro ao remover profissional.")
+
+def handle_remove_cliente(clinic_id: str, cliente_id: str):
+    if db_remover_cliente(clinic_id, cliente_id):
+        st.success("Cliente removido com sucesso!")
+        st.rerun()
+    else:
+        st.error("Erro ao remover cliente.")
+
+def handle_remove_servico(clinic_id: str, servico_id: str):
+    if db_remover_servico(clinic_id, servico_id):
+        st.success("Serviço removido com sucesso!")
+        st.rerun()
+    else:
+        st.error("Erro ao remover serviço.")
+
+def handle_remove_feriado(clinic_id: str, feriado_id: str):
+    if db_remover_feriado(clinic_id, feriado_id):
+        st.rerun()
+    else:
+        st.error("Erro ao remover feriado.")
+
 
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
 
@@ -565,7 +598,6 @@ def render_backoffice_clinica():
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
     
-    # CORREÇÃO: Havia um erro de digitação ("Clien tes" com espaço) que impedia esta aba de ser renderizada.
     elif active_tab == "👤 Gerenciar Clientes":
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
@@ -582,12 +614,12 @@ def render_backoffice_clinica():
             df_clientes = pd.DataFrame(clientes_clinica)
             st.dataframe(df_clientes[['nome', 'telefone', 'observacoes']], use_container_width=True)
             
-            cliente_para_remover_nome = st.selectbox("Selecione um cliente para remover", options=[""] + [c['nome'] for c in clientes_clinica])
+            # Usando um selectbox para escolher o cliente a ser removido para evitar múltiplos botões
+            cliente_para_remover_nome = st.selectbox("Selecione um cliente para remover", options=[""] + [c['nome'] for c in clientes_clinica], key="cliente_remover_select")
             if cliente_para_remover_nome:
-                if st.button(f"Remover {cliente_para_remover_nome}", type="primary"):
-                    cliente_id_remover = next((c['id'] for c in clientes_clinica if c['nome'] == cliente_para_remover_nome), None)
-                    if cliente_id_remover:
-                        remover_cliente(clinic_id, cliente_id_remover)
+                cliente_id_remover = next((c['id'] for c in clientes_clinica if c['nome'] == cliente_para_remover_nome), None)
+                if cliente_id_remover:
+                    st.button(f"Remover {cliente_para_remover_nome}", type="primary", key=f"del_cliente_{cliente_id_remover}", on_click=handle_remove_cliente, args=(clinic_id, cliente_id_remover))
         else:
             st.info("Nenhum cliente cadastrado.")
 
@@ -608,7 +640,7 @@ def render_backoffice_clinica():
                 sc1, sc2, sc3 = st.columns([0.5, 0.3, 0.2])
                 sc1.write(servico['nome'])
                 sc2.write(f"{servico['duracao_min']} minutos")
-                sc3.button("Remover", key=f"del_serv_{servico['id']}", on_click=remover_servico, args=(clinic_id, servico['id']))
+                sc3.button("Remover", key=f"del_serv_{servico['id']}", on_click=handle_remove_servico, args=(clinic_id, servico['id']))
         else:
             st.info("Nenhum serviço cadastrado.")
 
@@ -624,7 +656,7 @@ def render_backoffice_clinica():
             for prof in profissionais_clinica:
                 col1, col2 = st.columns([0.8, 0.2])
                 col1.write(prof['nome'])
-                col2.button("Remover", key=f"del_{prof['id']}", on_click=remover_profissional, args=(clinic_id, prof['id']))
+                col2.button("Remover", key=f"del_{prof['id']}", on_click=handle_remove_profissional, args=(clinic_id, prof['id']))
         else:
             st.info("Nenhum profissional cadastrado.")
 
@@ -689,7 +721,7 @@ def render_backoffice_clinica():
                 c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
                 c1.write(feriado['data'].strftime('%d/%m/%Y'))
                 c2.write(feriado['descricao'])
-                c3.button("Remover", key=f"del_feriado_{feriado['id']}", on_click=remover_feriado, args=(clinic_id, feriado['id']))
+                c3.button("Remover", key=f"del_feriado_{feriado['id']}", on_click=handle_remove_feriado, args=(clinic_id, feriado['id']))
 
 # --- ROTEAMENTO PRINCIPAL ---
 pin_param = st.query_params.get("pin")
