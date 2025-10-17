@@ -1,4 +1,4 @@
-# app.py (VERSÃO COM NOVAS FUNCIONALIDADES DE AGENDA, CRM, SERVIÇOS E DASHBOARD)
+# app.py (VERSÃO COM PAINEL DE SUPER ADMINISTRADOR)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -20,13 +20,16 @@ from database import (
     adicionar_feriado,
     listar_feriados,
     remover_feriado as db_remover_feriado,
-    # Novas funções de Clientes e Serviços
     listar_clientes,
     adicionar_cliente,
     remover_cliente as db_remover_cliente,
     listar_servicos,
     adicionar_servico,
-    remover_servico as db_remover_servico
+    remover_servico as db_remover_servico,
+    # Funções para o Super Admin
+    listar_clinicas,
+    adicionar_clinica,
+    toggle_status_clinica
 )
 from logica_negocio import (
     gerar_token_unico,
@@ -37,7 +40,6 @@ from logica_negocio import (
     processar_remarcacao,
     importar_feriados_nacionais,
     gerar_horarios_disponiveis,
-    # Novas funções de Relatórios e Agenda
     get_dados_dashboard,
     gerar_visao_semanal,
     gerar_visao_comparativa
@@ -61,20 +63,17 @@ if 'agendamentos_selecionados' not in st.session_state: st.session_state.agendam
 if 'remarcacao_status' not in st.session_state: st.session_state.remarcacao_status = None
 if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
 if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
-# CORREÇÃO: Usar chaves de estado separadas para os seletores de data
-if 'form_data_selecionada' not in st.session_state:
-    st.session_state.form_data_selecionada = datetime.now(TZ_SAO_PAULO).date()
-if 'filter_data_selecionada' not in st.session_state:
-    st.session_state.filter_data_selecionada = datetime.now(TZ_SAO_PAULO).date()
+if 'form_data_selecionada' not in st.session_state: st.session_state.form_data_selecionada = datetime.now(TZ_SAO_PAULO).date()
+if 'filter_data_selecionada' not in st.session_state: st.session_state.filter_data_selecionada = datetime.now(TZ_SAO_PAULO).date()
 if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
 if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
-# Estado para o novo fluxo de agendamento
 if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
 if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
-# Estado para o diálogo de confirmação
 if 'confirmando_agendamento' not in st.session_state: st.session_state.confirmando_agendamento = False
 if 'detalhes_agendamento' not in st.session_state: st.session_state.detalhes_agendamento = {}
+# Novo estado para Super Admin
+if 'is_super_admin' not in st.session_state: st.session_state.is_super_admin = False
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -84,25 +83,69 @@ def sync_dates_from_filter():
     st.session_state.form_data_selecionada = st.session_state.filter_data_selecionada
 
 def handle_login():
-    """Tenta autenticar a clínica."""
-    username = st.session_state.login_username
-    password = st.session_state.login_password
+    """Tenta autenticar a clínica ou o super admin."""
+    # CORREÇÃO: Usar .strip() para remover espaços em branco do input do usuário
+    username = st.session_state.login_username.strip()
+    password = st.session_state.login_password.strip()
+
+    # 1. Verificar se é o Super Admin (usando st.secrets)
+    super_admin_user = st.secrets.get("super_admin", {}).get("username")
+    super_admin_pass = st.secrets.get("super_admin", {}).get("password")
+
+    # CORREÇÃO: Usar .strip() nos segredos também, garantindo que não sejam nulos antes
+    if super_admin_user:
+        super_admin_user = super_admin_user.strip()
+    if super_admin_pass:
+        super_admin_pass = super_admin_pass.strip()
+        
+    if username == super_admin_user and password == super_admin_pass and super_admin_user is not None:
+        st.session_state.is_super_admin = True
+        st.session_state.clinic_id = None # Limpa qualquer ID de clínica
+        st.rerun()
+        return
+
+    # 2. Se não for admin, busca a clínica
     clinica = buscar_clinica_por_login(username, password)
     if clinica:
         st.session_state.clinic_id = clinica['id']
         st.session_state.clinic_name = clinica.get('nome_fantasia', username)
+        st.session_state.is_super_admin = False # Garante que não é admin
         st.rerun()
     else:
         st.error("Usuário ou senha inválidos.")
 
 def handle_logout():
-    """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento', 'detalhes_agendamento', 'form_data_selecionada', 'filter_data_selecionada']
+    """Limpa a sessão e desloga o usuário."""
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento', 'detalhes_agendamento', 'form_data_selecionada', 'filter_data_selecionada', 'is_super_admin']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
 
+def handle_add_clinica():
+    """Lida com a adição de uma nova clínica pelo Super Admin."""
+    nome = st.session_state.sa_nome_clinica
+    user = st.session_state.sa_user_clinica
+    pwd = st.session_state.sa_pwd_clinica
+
+    if nome and user and pwd:
+        sucesso, msg = adicionar_clinica(nome, user, pwd)
+        if sucesso:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(f"Erro: {msg}")
+    else:
+        st.warning("Todos os campos são obrigatórios.")
+
+def handle_toggle_status_clinica(clinic_id, status_atual):
+    """Ativa ou desativa uma clínica."""
+    if toggle_status_clinica(clinic_id, status_atual):
+        st.success("Status da clínica alterado com sucesso.")
+        st.rerun()
+    else:
+        st.error("Erro ao alterar o status da clínica.")
+# ... (restante das funções handle_... existentes, sem alterações) ...
 def handle_add_profissional():
     """Adiciona um novo profissional para a clínica logada."""
     nome_profissional = st.session_state.nome_novo_profissional
@@ -336,18 +379,18 @@ def handle_remove_feriado(clinic_id: str, feriado_id: str):
     else:
         st.error("Erro ao remover feriado.")
 
-
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
 
 def render_login_page():
     st.title("Bem-vindo ao Agenda Fit!")
-    st.write("Faça login para gerenciar sua clínica.")
+    st.write("Faça login para gerenciar sua clínica ou acesse o painel de administrador.")
     with st.form("login_form"):
         st.text_input("Usuário", key="login_username")
         st.text_input("Senha", type="password", key="login_password")
         st.form_submit_button("Entrar", on_click=handle_login)
 
 def render_agendamento_seguro():
+    # ... (código da página de gestão de agendamento do cliente, sem alterações) ...
     st.title("🔒 Gestão do seu Agendamento")
     if st.session_state.remarcacao_status:
         status = st.session_state.remarcacao_status
@@ -412,6 +455,7 @@ def render_agendamento_seguro():
             st.rerun()
 
 def render_backoffice_clinica():
+    # ... (código do backoffice da clínica, sem alterações funcionais) ...
     clinic_id = st.session_state.clinic_id
     
     st.sidebar.header(f"Clínica: {st.session_state.clinic_name}")
@@ -601,6 +645,7 @@ def render_backoffice_clinica():
 
 
     elif active_tab == "📈 Dashboard":
+        # ... (código do dashboard, sem alterações) ...
         st.header("📈 Dashboard de Desempenho")
         
         hoje = datetime.now(TZ_SAO_PAULO).date()
@@ -670,8 +715,9 @@ def render_backoffice_clinica():
                     st.plotly_chart(fig_heatmap, use_container_width=True)
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
-    
+
     elif active_tab == "👤 Gerenciar Clientes":
+        # ... (código da aba de clientes, sem alterações) ...
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
             st.subheader("Cadastrar Novo Cliente")
@@ -696,6 +742,7 @@ def render_backoffice_clinica():
             st.info("Nenhum cliente cadastrado.")
 
     elif active_tab == "📋 Gerenciar Serviços":
+        # ... (código da aba de serviços, sem alterações) ...
         st.header("📋 Gerenciar Serviços")
         with st.form("add_servico_form"):
             st.subheader("Cadastrar Novo Serviço")
@@ -717,6 +764,7 @@ def render_backoffice_clinica():
             st.info("Nenhum serviço cadastrado.")
 
     elif active_tab == "👥 Gerenciar Profissionais":
+        # ... (código da aba de profissionais, sem alterações) ...
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
@@ -733,6 +781,7 @@ def render_backoffice_clinica():
             st.info("Nenhum profissional cadastrado.")
 
     elif active_tab == "⚙️ Configurações":
+        # ... (código da aba de configurações, sem alterações) ...
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
         if not profissionais_clinica:
@@ -795,15 +844,50 @@ def render_backoffice_clinica():
                 c2.write(feriado['descricao'])
                 c3.button("Remover", key=f"del_feriado_{feriado['id']}", on_click=handle_remove_feriado, args=(clinic_id, feriado['id']))
 
+def render_super_admin_panel():
+    """Renderiza a página de gerenciamento do Super Administrador."""
+    st.title("🔑 Painel do Super Administrador")
+    st.sidebar.header("Modo Admin")
+    if st.sidebar.button("Sair do Modo Admin"):
+        handle_logout()
+
+    st.subheader("Cadastrar Nova Clínica")
+    with st.form("add_clinic_form", clear_on_submit=True):
+        st.text_input("Nome Fantasia da Clínica", key="sa_nome_clinica")
+        col1, col2 = st.columns(2)
+        col1.text_input("Usuário (para login da clínica)", key="sa_user_clinica")
+        col2.text_input("Senha (provisória)", key="sa_pwd_clinica", type="password")
+        st.form_submit_button("Adicionar Clínica", on_click=handle_add_clinica)
+
+    st.markdown("---")
+    st.subheader("Clínicas Cadastradas")
+    
+    clinicas = listar_clinicas()
+    if not clinicas:
+        st.info("Nenhuma clínica cadastrada.")
+    else:
+        for clinica in clinicas:
+            col1, col2, col3 = st.columns([0.5, 0.2, 0.3])
+            with col1:
+                st.write(f"**{clinica.get('nome_fantasia', 'Nome não definido')}**")
+                st.caption(f"Usuário: {clinica.get('username')}")
+            with col2:
+                status = clinica.get('ativo', False)
+                st.write("Status: " + ("✅ Ativa" if status else "❌ Inativa"))
+            with col3:
+                button_text = "Desativar" if status else "Ativar"
+                st.button(button_text, key=f"toggle_{clinica['id']}", on_click=handle_toggle_status_clinica, args=(clinica['id'], status))
+
 # --- ROTEAMENTO PRINCIPAL ---
 pin_param = st.query_params.get("pin")
+
 if pin_param:
     render_agendamento_seguro()
+elif st.session_state.get('is_super_admin'):
+    render_super_admin_panel()
 elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
-
-
 
 
