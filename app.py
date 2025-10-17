@@ -67,7 +67,8 @@ if 'editando_horario_id' not in st.session_state: st.session_state.editando_hora
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
 # Estado para o novo fluxo de agendamento
 if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
-if 'cliente_selecionado_telefone' not in st.session_state: st.session_state.cliente_selecionado_telefone = ""
+# CORREÇÃO: Usar a chave do próprio widget de input para controlar seu valor
+if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
 def handle_login():
@@ -84,7 +85,7 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'cliente_selecionado_telefone']
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'c_tel_input']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -106,15 +107,17 @@ def handle_add_profissional():
 def handle_selecao_cliente():
     """Callback para atualizar o telefone quando um cliente é selecionado."""
     cliente_selecionado = st.session_state.agenda_cliente_select
+    # A chave do widget de telefone é 'c_tel_input'. Vamos atualizá-la diretamente.
     if cliente_selecionado != "Novo Cliente":
         clientes = listar_clientes(st.session_state.clinic_id)
         cliente_data = next((c for c in clientes if c['nome'] == cliente_selecionado), None)
         if cliente_data:
-            st.session_state.cliente_selecionado_telefone = cliente_data.get('telefone', '')
+            st.session_state.c_tel_input = cliente_data.get('telefone', '')
         else:
-            st.session_state.cliente_selecionado_telefone = ''
+            st.session_state.c_tel_input = ''
     else:
-        st.session_state.cliente_selecionado_telefone = ''
+        # Limpa o campo de telefone para o novo cliente
+        st.session_state.c_tel_input = ''
 
 
 def handle_agendamento_submission():
@@ -167,7 +170,7 @@ def handle_agendamento_submission():
             st.session_state.data_filtro_agenda = data_consulta
             # Limpa o estado após o agendamento
             st.session_state.agenda_cliente_select = "Novo Cliente"
-            st.session_state.cliente_selecionado_telefone = ""
+            st.session_state.c_tel_input = ""
 
         else:
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
@@ -431,10 +434,10 @@ def render_backoffice_clinica():
                     col_tel.text_input("Telefone", key="c_tel_input")
                 else:
                     st.markdown(f"**Agendando para:** {st.session_state.agenda_cliente_select}")
+                    # O valor é controlado pelo callback handle_selecao_cliente, que atualiza o estado do widget diretamente.
                     st.text_input(
                         "Telefone (edite se necessário)", 
-                        key="c_tel_input", 
-                        value=st.session_state.cliente_selecionado_telefone
+                        key="c_tel_input"
                     )
                 
                 st.divider()
