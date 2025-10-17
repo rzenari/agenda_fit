@@ -87,10 +87,6 @@ if 'detalhes_agendamento' not in st.session_state:
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
-def sync_agenda_filter_date():
-    """Callback para sincronizar a data do filtro da agenda com a data do formulário."""
-    st.session_state.data_filtro_agenda = st.session_state.c_data_input
-
 def handle_login():
     """Tenta autenticar a clínica."""
     username = st.session_state.login_username
@@ -492,8 +488,8 @@ def render_backoffice_clinica():
 
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
-                # CORREÇÃO: Adicionado o callback on_change para sincronizar a agenda
-                form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today(), on_change=sync_agenda_filter_date)
+                # CORREÇÃO: Removido o callback on_change que estava causando o erro.
+                form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
                 form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
 
                 servico_selecionado_nome = st.session_state.c_servico_input
@@ -519,6 +515,14 @@ def render_backoffice_clinica():
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
         
+        # --- NOVA LÓGICA DE SINCRONIZAÇÃO ---
+        # Se a data no formulário de agendamento (c_data_input) foi alterada,
+        # atualiza a data do filtro da agenda (data_filtro_agenda) para refletir a mudança.
+        # Isso substitui o callback que causava o erro.
+        if 'c_data_input' in st.session_state and st.session_state.data_filtro_agenda != st.session_state.c_data_input:
+            st.session_state.data_filtro_agenda = st.session_state.c_data_input
+            st.rerun()
+
         view_tab1, view_tab2, view_tab3 = st.tabs(["Visão Diária (Lista)", "Visão Semanal (Profissional)", "Visão Comparativa (Diária)"])
 
         with view_tab1:
@@ -802,3 +806,4 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
+
