@@ -565,7 +565,8 @@ def render_backoffice_clinica():
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
     
-    elif active_tab == "👤 Gerenciar Clien tes":
+    # CORREÇÃO: Havia um erro de digitação ("Clien tes" com espaço) que impedia esta aba de ser renderizada.
+    elif active_tab == "👤 Gerenciar Clientes":
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
             st.subheader("Cadastrar Novo Cliente")
@@ -573,7 +574,7 @@ def render_backoffice_clinica():
             c1.text_input("Nome do Cliente", key="nome_novo_cliente")
             c2.text_input("Telefone", key="tel_novo_cliente")
             st.text_area("Observações", key="obs_novo_cliente")
-            st.form_submit_button("Adicionar Cliente", on_click=handle_add_cliente) # CORREÇÃO
+            st.form_submit_button("Adicionar Cliente", on_click=handle_add_cliente)
         
         st.markdown("---")
         st.subheader("Clientes Cadastrados")
@@ -615,7 +616,7 @@ def render_backoffice_clinica():
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
-            st.form_submit_button("Adicionar", on_click=handle_add_profissional) # CORREÇÃO
+            st.form_submit_button("Adicionar", on_click=handle_add_profissional)
 
         st.markdown("---")
         st.subheader("Profissionais Cadastrados")
@@ -652,7 +653,7 @@ def render_backoffice_clinica():
                             cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
                         
                         submit_cols = st.columns(2)
-                        submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True, on_click=handle_salvar_horarios_profissional, args=(prof_id,)) # CORREÇÃO
+                        submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True, on_click=handle_salvar_horarios_profissional, args=(prof_id,))
                         if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
                             st.session_state.editando_horario_id = None
                             st.rerun()
@@ -674,7 +675,7 @@ def render_backoffice_clinica():
             with st.form("add_feriado_form"):
                 st.date_input("Data do Feriado/Folga", key="nova_data_feriado")
                 st.text_input("Descrição", key="descricao_feriado", placeholder="Ex: Feriado Municipal")
-                st.form_submit_button("Adicionar Data Bloqueada", on_click=handle_adicionar_feriado) # CORREÇÃO
+                st.form_submit_button("Adicionar Data Bloqueada", on_click=handle_adicionar_feriado)
         with col2:
             st.write("Importar Feriados Nacionais (Brasil)")
             st.number_input("Ano", min_value=datetime.now().year, max_value=datetime.now().year + 5, key="ano_importacao", label_visibility="collapsed")
