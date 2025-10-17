@@ -68,11 +68,8 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
         for _, ag in agendamentos_existentes.iterrows():
             if ag['status'] == 'Confirmado':
                 dt_inicio_existente = ag['horario']
-                duracao_val = ag.get('duracao_min')
-                if pd.isna(duracao_val) or duracao_val is None:
-                    duracao_existente = 30
-                else:
-                    duracao_existente = int(duracao_val)
+                # CORREÇÃO: Usar um valor padrão (30) se a duração não estiver presente
+                duracao_existente = int(ag.get('duracao_min', 30))
                 
                 dt_fim_existente = dt_inicio_existente + timedelta(minutes=duracao_existente)
                 
@@ -158,10 +155,11 @@ def importar_feriados_nacionais(clinic_id: str, ano: int):
 
 def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_selecionada: date, duracao_servico: int, agendamento_id_excluir: str = None):
     """
-    Gera uma lista de horários disponíveis considerando a duração do serviço.
+    Gera uma lista de horários disponíveis mapeando os blocos livres do dia.
     """
     from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
 
+    # 1. Validações iniciais (feriado, profissional, horário de trabalho)
     feriados = listar_feriados(clinic_id)
     if any(f['data'] == data_selecionada for f in feriados):
         return []
@@ -180,51 +178,52 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         return []
 
     try:
-        inicio_expediente_dt = datetime.strptime(horario_dia['inicio'], "%H:%M")
-        fim_expediente_dt = datetime.strptime(horario_dia['fim'], "%H:%M")
+        inicio_expediente = datetime.strptime(horario_dia['inicio'], "%H:%M").time()
+        fim_expediente = datetime.strptime(horario_dia['fim'], "%H:%M").time()
+        inicio_expediente_dt = datetime.combine(data_selecionada, inicio_expediente, tzinfo=TZ_SAO_PAULO)
+        fim_expediente_dt = datetime.combine(data_selecionada, fim_expediente, tzinfo=TZ_SAO_PAULO)
     except (ValueError, KeyError):
         return []
 
+    # 2. Mapear Blocos Ocupados
     agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
-    
     if agendamento_id_excluir and not agendamentos_existentes_df.empty:
         agendamentos_existentes_df = agendamentos_existentes_df[agendamentos_existentes_df['id'] != agendamento_id_excluir]
 
-    agendamentos_ocupados = []
+    blocos_ocupados = []
     if not agendamentos_existentes_df.empty:
-        for _, ag in agendamentos_existentes_df.iterrows():
-            if ag['status'] == 'Confirmado':
-                inicio = ag['horario']
-                duracao_val = ag.get('duracao_min')
-                if pd.isna(duracao_val) or duracao_val is None:
-                    duracao = 30
-                else:
-                    duracao = int(duracao_val)
-                
-                fim = inicio + timedelta(minutes=duracao)
-                agendamentos_ocupados.append((inicio, fim))
+        df_confirmados = agendamentos_existentes_df[agendamentos_existentes_df['status'] == 'Confirmado']
+        for _, ag in df_confirmados.iterrows():
+            inicio = ag['horario']
+            duracao = int(ag.get('duracao_min', 30))
+            fim = inicio + timedelta(minutes=duracao)
+            blocos_ocupados.append((inicio, fim))
+    blocos_ocupados.sort()
 
+    # 3. Identificar Blocos Livres
+    blocos_livres = []
+    ponteiro_tempo = inicio_expediente_dt
+    
+    for inicio_ocupado, fim_ocupado in blocos_ocupados:
+        if ponteiro_tempo < inicio_ocupado:
+            blocos_livres.append((ponteiro_tempo, inicio_ocupado))
+        ponteiro_tempo = fim_ocupado
+    
+    if ponteiro_tempo < fim_expediente_dt:
+        blocos_livres.append((ponteiro_tempo, fim_expediente_dt))
+
+    # 4. Gerar Horários Válidos a Partir dos Blocos Livres
     horarios_disponiveis = []
-    intervalo_minimo = 15
-    slot_atual = datetime.combine(data_selecionada, inicio_expediente_dt.time(), tzinfo=TZ_SAO_PAULO)
-    fim_expediente_completo = datetime.combine(data_selecionada, fim_expediente_dt.time(), tzinfo=TZ_SAO_PAULO)
+    intervalo_minimo = 15 # Define a granularidade da busca (ex: 9:00, 9:15, 9:30...)
 
-    while slot_atual + timedelta(minutes=duracao_servico) <= fim_expediente_completo:
-        inicio_novo = slot_atual
-        fim_novo = inicio_novo + timedelta(minutes=duracao_servico)
-        
-        conflito = False
-        for inicio_ocupado, fim_ocupado in agendamentos_ocupados:
-            if inicio_novo < fim_ocupado and inicio_ocupado < fim_novo:
-                conflito = True
-                break
-        
-        if not conflito:
-            horarios_disponiveis.append(inicio_novo.time())
+    for inicio_livre, fim_livre in blocos_livres:
+        slot_atual = inicio_livre
+        while slot_atual + timedelta(minutes=duracao_servico) <= fim_livre:
+            horarios_disponiveis.append(slot_atual.time())
+            slot_atual += timedelta(minutes=intervalo_minimo)
             
-        slot_atual += timedelta(minutes=intervalo_minimo)
+    return sorted(list(set(horarios_disponiveis))) # Remove duplicados e ordena
 
-    return horarios_disponiveis
 
 # --- Funções para Visões de Agenda ---
 def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: date):
