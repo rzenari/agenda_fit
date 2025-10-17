@@ -1,4 +1,4 @@
-# database.py (VERSÃO MULTI-CLINICA COM GESTÃO DE HORÁRIOS E FERIADOS)
+# database.py (VERSÃO MULTI-CLINICA COM CORREÇÃO DE ÍNDICE DE FERIADOS)
 
 import streamlit as st
 import pandas as pd
@@ -91,7 +91,6 @@ def atualizar_horario_profissional(clinic_id, profissional_id, horarios):
     """Atualiza a configuração de horário de um profissional."""
     try:
         prof_ref = db.collection('profissionais').document(profissional_id)
-        # Garante que a operação só ocorra se o profissional for da clínica correta
         prof_doc = prof_ref.get()
         if prof_doc.exists and prof_doc.to_dict().get('clinic_id') == clinic_id:
             prof_ref.update({'horario_trabalho': horarios})
@@ -105,7 +104,6 @@ def atualizar_horario_profissional(clinic_id, profissional_id, horarios):
 def adicionar_feriado(clinic_id, data_feriado, descricao):
     """Adiciona uma data de feriado/folga para uma clínica."""
     try:
-        # Converte a data para timestamp para salvar no Firestore
         data_ts = datetime.combine(data_feriado, datetime.min.time())
         db.collection('feriados').add({
             'clinic_id': clinic_id,
@@ -120,16 +118,17 @@ def adicionar_feriado(clinic_id, data_feriado, descricao):
 def listar_feriados(clinic_id):
     """Lista todos os feriados de uma clínica, ordenados por data."""
     try:
-        query = db.collection('feriados').where('clinic_id', '==', clinic_id).order_by('data')
+        query = db.collection('feriados').where('clinic_id', '==', clinic_id)
         docs = query.stream()
         feriados = []
         for doc in docs:
             feriado_data = doc.to_dict()
             feriado_data['id'] = doc.id
-            # Converte o timestamp de volta para um objeto date para exibição
             if 'data' in feriado_data and isinstance(feriado_data['data'], datetime):
                 feriado_data['data'] = feriado_data['data'].date()
             feriados.append(feriado_data)
+        # Ordena a lista em Python para evitar a necessidade de índice no Firestore
+        feriados.sort(key=lambda x: x['data'])
         return feriados
     except Exception as e:
         print(f"Erro ao listar feriados: {e}")
@@ -150,7 +149,7 @@ def remover_feriado(clinic_id, feriado_id):
         return False
 
 
-# --- FUNÇÕES DE AGENDAMENTO (permanecem as mesmas) ---
+# --- FUNÇÕES DE AGENDAMENTO ---
 def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
     horario_utc = dados['horario'].astimezone(timezone.utc)
     data_para_salvar = {
