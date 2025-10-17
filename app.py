@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM MENSAGEM WHATSAPP)
+# app.py (VERSÃO MULTI-CLINICA COM MENSAGEM WHATSAPP CORRIGIDA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -367,8 +367,9 @@ def render_backoffice_clinica():
                         st.markdown(f"**PIN:** `{pin}`")
                         st.markdown(f"**Link de Gestão:** `{link}`")
 
-                    # Modal de Mensagem WhatsApp
-                    if action_cols[1].button("💬", key=f"wpp_{ag_id}", help="Gerar Mensagem WhatsApp"):
+                    # Popover de Mensagem WhatsApp (CORRIGIDO)
+                    wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
+                    with wpp_popover:
                         pin = row.get('pin_code', 'N/A')
                         link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
                         mensagem = (
@@ -377,11 +378,8 @@ def render_backoffice_clinica():
                             f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
                             f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
                         )
-                        
-                        # Usando st.modal para o pop-up
-                        with st.modal("Mensagem para WhatsApp", key=f"modal_wpp_{ag_id}"):
-                            st.text_area("Mensagem:", value=mensagem, height=200)
-                            st.write("Copie a mensagem acima e envie para o cliente.")
+                        st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
+                        st.write("Copie a mensagem acima e envie para o cliente.")
 
                     # Botões de Ação
                     action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
