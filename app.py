@@ -475,42 +475,45 @@ def render_backoffice_clinica():
             )
 
             st.subheader("2. Preencha os Detalhes do Agendamento")
-            with st.form("admin_form"):
-                if st.session_state.agenda_cliente_select == "Novo Cliente":
-                    col_nome, col_tel = st.columns(2)
-                    col_nome.text_input("Nome do Novo Cliente", key="c_nome_novo_cliente_input")
-                    col_tel.text_input("Telefone", key="c_tel_input")
-                else:
-                    st.markdown(f"**Agendando para:** {st.session_state.agenda_cliente_select}")
-                    st.text_input("Telefone (edite se necessário)", key="c_tel_input")
-                
-                st.divider()
+            
+            # CORREÇÃO: Removido o st.form para permitir a atualização dinâmica dos horários.
+            # Agora, cada alteração nos widgets abaixo irá re-executar o script e atualizar a lista de horários.
+            
+            if st.session_state.agenda_cliente_select == "Novo Cliente":
+                col_nome, col_tel = st.columns(2)
+                col_nome.text_input("Nome do Novo Cliente", key="c_nome_novo_cliente_input")
+                col_tel.text_input("Telefone", key="c_tel_input")
+            else:
+                st.markdown(f"**Agendando para:** {st.session_state.agenda_cliente_select}")
+                st.text_input("Telefone (edite se necessário)", key="c_tel_input")
+            
+            st.divider()
 
-                form_cols = st.columns(3)
-                form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
-                # CORREÇÃO: Usar chave única para o date_input do formulário
-                form_cols[1].date_input("Data:", key="form_data_selecionada", min_value=date.today())
-                form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
+            form_cols = st.columns(3)
+            form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
+            form_cols[1].date_input("Data:", key="form_data_selecionada", min_value=date.today())
+            form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
 
-                servico_selecionado_nome = st.session_state.c_servico_input
-                servico_data = next((s for s in servicos_clinica if s['nome'] == servico_selecionado_nome), None)
-                duracao_servico = servico_data['duracao_min'] if servico_data else 30
+            servico_selecionado_nome = st.session_state.c_servico_input
+            servico_data = next((s for s in servicos_clinica if s['nome'] == servico_selecionado_nome), None)
+            duracao_servico = servico_data['duracao_min'] if servico_data else 30
 
-                horarios_disponiveis = gerar_horarios_disponiveis(
-                    clinic_id, 
-                    st.session_state.c_prof_input, 
-                    st.session_state.form_data_selecionada, # Usar estado do formulário
-                    duracao_servico
-                )
-                
-                if horarios_disponiveis:
-                    form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
-                    pode_agendar = True
-                else:
-                    form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
-                    pode_agendar = False
-
-                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
+            horarios_disponiveis = gerar_horarios_disponiveis(
+                clinic_id, 
+                st.session_state.c_prof_input, 
+                st.session_state.form_data_selecionada, # Usar estado do formulário
+                duracao_servico
+            )
+            
+            if horarios_disponiveis:
+                form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
+                pode_agendar = True
+            else:
+                form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
+                pode_agendar = False
+            
+            # CORREÇÃO: Trocado st.form_submit_button por st.button
+            st.button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
 
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
@@ -800,6 +803,8 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
+" to help you answer my query.
 
+Query: "Se eu alterar o profissional, a agenda de horários disponíveis deve ser atualizada. Faça esse ajuste."
 
 
