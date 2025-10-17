@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM GESTÃO DE HORÁRIOS E FERIADOS)
+# app.py (VERSÃO MULTI-CLINICA COM GESTÃO DE HORÁRIOS E FERIADOS MELHORADA)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -48,7 +48,7 @@ if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
 if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
 if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
 if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
-if 'profissional_selecionado_config' not in st.session_state: st.session_state.profissional_selecionado_config = None
+if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None # Controla qual profissional está sendo editado
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -66,7 +66,7 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'profissional_selecionado_config']
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -123,9 +123,8 @@ def handle_agendamento_submission():
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': msg_disponibilidade}
     st.rerun()
 
-def handle_salvar_horarios_profissional():
+def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
-    prof_id = st.session_state.profissional_selecionado_config
     if not prof_id:
         st.error("Nenhum profissional selecionado.")
         return
@@ -140,6 +139,7 @@ def handle_salvar_horarios_profissional():
     
     if atualizar_horario_profissional(st.session_state.clinic_id, prof_id, horarios):
         st.success("Horários de trabalho atualizados com sucesso!")
+        st.session_state.editando_horario_id = None # Sai do modo de edição
     else:
         st.error("Falha ao atualizar horários.")
 
@@ -330,7 +330,7 @@ def render_backoffice_clinica():
             st.info("Nenhum profissional cadastrado.")
 
     with tab3:
-        # --- NOVO PAINEL DE CONFIGURAÇÕES ---
+        # --- PAINEL DE CONFIGURAÇÕES MELHORADO ---
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
 
@@ -338,24 +338,43 @@ def render_backoffice_clinica():
             st.info("Cadastre profissionais na aba 'Gerenciar Profissionais' para definir seus horários.")
         else:
             prof_dict = {p['nome']: p['id'] for p in profissionais_clinica}
-            prof_selecionado_nome = st.selectbox("Selecione um profissional para configurar", options=prof_dict.keys())
+            prof_selecionado_nome = st.selectbox("Selecione um profissional para configurar", options=prof_dict.keys(), key="selectbox_prof_config")
             
             if prof_selecionado_nome:
                 prof_id = prof_dict[prof_selecionado_nome]
-                st.session_state.profissional_selecionado_config = prof_id
-                
-                # Encontra os dados do profissional selecionado
                 prof_data = next((p for p in profissionais_clinica if p['id'] == prof_id), None)
                 horarios_salvos = prof_data.get('horario_trabalho', {})
 
-                with st.form(key=f"form_horarios_{prof_id}"):
+                # MODO DE EDIÇÃO
+                if st.session_state.editando_horario_id == prof_id:
+                    with st.form(key=f"form_horarios_{prof_id}"):
+                        st.write(f"**Editando horários para: {prof_selecionado_nome}**")
+                        for dia_key, dia_nome in DIAS_SEMANA.items():
+                            horario_dia = horarios_salvos.get(dia_key, {"ativo": False, "inicio": "09:00", "fim": "18:00"})
+                            cols = st.columns([0.2, 0.4, 0.4])
+                            cols[0].checkbox(dia_nome, key=f"ativo_{dia_key}_{prof_id}", value=horario_dia['ativo'])
+                            cols[1].time_input("Início", key=f"inicio_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['inicio'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
+                            cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
+                        
+                        submit_cols = st.columns(2)
+                        submit_cols[0].form_submit_button("✅ Salvar Alterações", on_click=handle_salvar_horarios_profissional, args=(prof_id,), use_container_width=True)
+                        if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
+                            st.session_state.editando_horario_id = None
+                            st.rerun()
+
+                # MODO DE VISUALIZAÇÃO
+                else:
+                    st.write(f"**Horários salvos para: {prof_selecionado_nome}**")
                     for dia_key, dia_nome in DIAS_SEMANA.items():
                         horario_dia = horarios_salvos.get(dia_key, {"ativo": False, "inicio": "09:00", "fim": "18:00"})
-                        cols = st.columns([0.2, 0.4, 0.4])
-                        cols[0].checkbox(dia_nome, key=f"ativo_{dia_key}_{prof_id}", value=horario_dia['ativo'])
-                        cols[1].time_input("Início", key=f"inicio_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['inicio'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
-                        cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
-                    st.form_submit_button("Salvar Horários", on_click=handle_salvar_horarios_profissional)
+                        if horario_dia['ativo']:
+                            st.text(f"{dia_nome}: {horario_dia['inicio']} - {horario_dia['fim']}")
+                        else:
+                            st.text(f"{dia_nome}: Não trabalha")
+                    
+                    if st.button("✏️ Editar Horários", key=f"edit_{prof_id}"):
+                        st.session_state.editando_horario_id = prof_id
+                        st.rerun()
 
         st.markdown("---")
         st.subheader("Feriados e Folgas")
