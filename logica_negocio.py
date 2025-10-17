@@ -1,4 +1,4 @@
-# logica_negocio.py (VERSÃO MULTI-CLINICA COM HORÁRIOS DINÂMICOS)
+# logica_negocio.py (VERSÃO COM LÓGICA DE TURMAS)
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -14,19 +14,21 @@ from database import (
     atualizar_horario_agendamento,
     listar_profissionais,
     adicionar_feriado,
-    buscar_agendamentos_por_intervalo
+    buscar_agendamentos_por_intervalo,
+    # Funções para turmas
+    contar_agendamentos_turma_dia
 )
 
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 DIAS_SEMANA_PT = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
-
+DIAS_MAP_WEEKDAY_TO_KEY = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
 
 def gerar_token_unico():
     """Gera um código PIN numérico de 6 dígitos."""
     return str(random.randint(100000, 999999))
 
 def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str, data_hora_inicio: datetime, duracao: int, agendamento_id_excluir: str = None):
-    """Verifica se um slot de tempo específico está disponível, considerando a duração."""
+    """Verifica se um slot de tempo específico está disponível para agendamento INDIVIDUAL."""
     from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
     
     profissionais = listar_profissionais(clinic_id)
@@ -35,8 +37,7 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
         return False, "Profissional não encontrado."
 
     horarios_trabalho = profissional_data.get('horario_trabalho', {})
-    dias_map = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
-    dia_key = dias_map[data_hora_inicio.weekday()]
+    dia_key = DIAS_MAP_WEEKDAY_TO_KEY[data_hora_inicio.weekday()]
     horario_dia = horarios_trabalho.get(dia_key)
 
     if not horario_dia or not horario_dia.get('ativo'):
@@ -61,16 +62,17 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
 
     agendamentos_existentes = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_hora_inicio.date())
     
-    if agendamento_id_excluir and not agendamentos_existentes.empty:
-        agendamentos_existentes = agendamentos_existentes[agendamentos_existentes['id'] != agendamento_id_excluir]
+    # Filtra apenas agendamentos individuais para checagem de conflito
+    agendamentos_individuais = agendamentos_existentes[agendamentos_existentes['turma_id'].isnull()]
 
-    if not agendamentos_existentes.empty:
-        for _, ag in agendamentos_existentes.iterrows():
+    if agendamento_id_excluir and not agendamentos_individuais.empty:
+        agendamentos_individuais = agendamentos_individuais[agendamentos_individuais['id'] != agendamento_id_excluir]
+
+    if not agendamentos_individuais.empty:
+        for _, ag in agendamentos_individuais.iterrows():
             if ag['status'] == 'Confirmado':
                 dt_inicio_existente = ag['horario']
-                # CORREÇÃO: Usar um valor padrão (30) se a duração não estiver presente
                 duracao_existente = int(ag.get('duracao_min', 30))
-                
                 dt_fim_existente = dt_inicio_existente + timedelta(minutes=duracao_existente)
                 
                 if data_hora_inicio < dt_fim_existente and dt_inicio_existente < dt_fim_novo:
@@ -155,11 +157,10 @@ def importar_feriados_nacionais(clinic_id: str, ano: int):
 
 def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_selecionada: date, duracao_servico: int, agendamento_id_excluir: str = None):
     """
-    Gera uma lista de horários disponíveis verificando cada slot de tempo do dia.
+    Gera uma lista de horários disponíveis para atendimentos individuais.
     """
     from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
 
-    # 1. Validações iniciais (feriado, profissional, horário de trabalho)
     feriados = listar_feriados(clinic_id)
     if any(f['data'] == data_selecionada for f in feriados):
         return []
@@ -170,8 +171,7 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         return []
 
     horarios_trabalho = profissional_data.get('horario_trabalho', {})
-    dias_map = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
-    dia_key = dias_map[data_selecionada.weekday()]
+    dia_key = DIAS_MAP_WEEKDAY_TO_KEY[data_selecionada.weekday()]
     horario_dia = horarios_trabalho.get(dia_key)
 
     if not horario_dia or not horario_dia.get('ativo'):
@@ -185,36 +185,34 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
     except (ValueError, KeyError):
         return []
 
-    # 2. Mapear todos os blocos ocupados do dia
     agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
-    if agendamento_id_excluir and not agendamentos_existentes_df.empty:
-        agendamentos_existentes_df = agendamentos_existentes_df[agendamentos_existentes_df['id'] != agendamento_id_excluir]
+    agendamentos_individuais_df = agendamentos_existentes_df[agendamentos_existentes_df['turma_id'].isnull()]
+    
+    if agendamento_id_excluir and not agendamentos_individuais_df.empty:
+        agendamentos_individuais_df = agendamentos_individuais_df[agendamentos_individuais_df['id'] != agendamento_id_excluir]
 
     blocos_ocupados = []
-    if not agendamentos_existentes_df.empty:
-        df_confirmados = agendamentos_existentes_df[agendamentos_existentes_df['status'] == 'Confirmado']
+    if not agendamentos_individuais_df.empty:
+        df_confirmados = agendamentos_individuais_df[agendamentos_individuais_df['status'] == 'Confirmado']
         for _, ag in df_confirmados.iterrows():
             inicio = ag['horario']
             duracao = int(ag.get('duracao_min', 30))
             fim = inicio + timedelta(minutes=duracao)
             blocos_ocupados.append((inicio, fim))
 
-    # 3. Gerar horários verificando cada slot possível (lógica robusta)
     horarios_disponiveis = []
-    intervalo_minimo = 15  # Define a granularidade da busca (ex: 9:00, 9:15, 9:30...)
+    intervalo_minimo = 15
     slot_candidato = inicio_expediente_dt
 
     while slot_candidato + timedelta(minutes=duracao_servico) <= fim_expediente_dt:
         fim_slot_candidato = slot_candidato + timedelta(minutes=duracao_servico)
         conflito = False
 
-        # Para cada slot candidato, verifica se ele se sobrepõe a algum agendamento
         for inicio_ocupado, fim_ocupado in blocos_ocupados:
-            # Lógica de sobreposição: (InícioA < FimB) E (FimA > InícioB)
             if slot_candidato < fim_ocupado and fim_slot_candidato > inicio_ocupado:
                 conflito = True
-                break  # Se encontrou conflito, para de verificar este slot
-
+                break
+        
         if not conflito:
             horarios_disponiveis.append(slot_candidato.time())
 
@@ -222,14 +220,51 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
 
     horarios_unicos = sorted(list(set(horarios_disponiveis)))
 
-    # 4. Se a data for hoje, remover horários que já passaram
     if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
         hora_atual = datetime.now(TZ_SAO_PAULO).time()
         horarios_futuros = [h for h in horarios_unicos if h >= hora_atual]
         return horarios_futuros
     
-    # Se a data não for hoje, retorna todos os horários únicos encontrados.
     return horarios_unicos
+
+def gerar_turmas_disponiveis(clinic_id: str, data_selecionada: date, turmas_clinica: list):
+    """
+    Verifica as turmas do dia e retorna uma lista com as vagas disponíveis.
+    """
+    from database import listar_feriados
+    
+    feriados = listar_feriados(clinic_id)
+    if any(f['data'] == data_selecionada for f in feriados):
+        return []
+    
+    dia_semana_key = DIAS_MAP_WEEKDAY_TO_KEY.get(data_selecionada.weekday())
+    if not dia_semana_key:
+        return []
+
+    turmas_do_dia = [t for t in turmas_clinica if dia_semana_key in t.get('dias_semana', [])]
+    
+    turmas_disponiveis = []
+    for turma in turmas_do_dia:
+        horario_obj = datetime.strptime(turma['horario'], '%H:%M').time()
+        
+        # Se for hoje, só mostra turmas futuras
+        if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
+            if horario_obj <= datetime.now(TZ_SAO_PAULO).time():
+                continue
+
+        vagas_ocupadas = contar_agendamentos_turma_dia(clinic_id, turma['id'], data_selecionada)
+        capacidade = turma.get('capacidade_maxima', 0)
+        vagas_disponiveis = capacidade - vagas_ocupadas
+        
+        if vagas_disponiveis > 0:
+            turma_info = turma.copy()
+            turma_info['vagas_ocupadas'] = vagas_ocupadas
+            turma_info['vagas_disponiveis'] = vagas_disponiveis
+            turma_info['horario_str'] = turma['horario']
+            turma_info['horario_obj'] = horario_obj
+            turmas_disponiveis.append(turma_info)
+            
+    return sorted(turmas_disponiveis, key=lambda t: t['horario_obj'])
 
 
 # --- Funções para Visões de Agenda ---
@@ -242,6 +277,7 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
 
     df_prof = df_agendamentos[
         (df_agendamentos['profissional_nome'] == profissional_nome) &
+        (df_agendamentos['turma_id'].isnull()) & # Apenas agendamentos individuais
         (df_agendamentos['status'] == 'Confirmado')
     ].copy()
     
@@ -258,7 +294,6 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
         aggfunc='first'
     ).fillna('')
     
-    # Ordenar colunas pela semana
     dias_ordem = [DIAS_SEMANA_PT[i] for i in range(7)]
     cols_presentes = [col for col in dias_ordem if col in pivot_table.columns]
     return pivot_table[cols_presentes]
@@ -270,7 +305,10 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
     if df_agendamentos.empty:
         return pd.DataFrame(index=[], columns=nomes_profissionais).fillna('')
     
-    df_dia = df_agendamentos[df_agendamentos['status'] == 'Confirmado'].copy()
+    df_dia = df_agendamentos[
+        (df_agendamentos['status'] == 'Confirmado') &
+        (df_agendamentos['turma_id'].isnull()) # Apenas individuais
+    ].copy()
     
     if df_dia.empty:
         return pd.DataFrame(index=[], columns=nomes_profissionais).fillna('')
@@ -284,10 +322,8 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
         aggfunc='first'
     ).fillna('')
 
-    # Adicionar profissionais sem agendamentos como colunas vazias
     for prof in nomes_profissionais:
         if prof not in pivot.columns:
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
-
