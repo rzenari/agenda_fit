@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM CORREÇÃO DEFINITIVA DE NAVEGAÇÃO)
+# app.py (VERSÃO MULTI-CLINICA COM CORREÇÃO DE LIMPEZA DE FORMULÁRIO)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -49,7 +49,6 @@ if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
 if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
 if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
 if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None
-# Chave para controlar a aba ativa. O nome das abas aqui deve ser igual ao da lista `tab_options`.
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
 
 
@@ -74,8 +73,6 @@ def handle_logout():
             del st.session_state[key]
     st.rerun()
 
-# (As demais funções handle não precisam modificar 'active_tab', pois a UI se encarrega disso)
-
 def handle_add_profissional():
     """Adiciona um novo profissional para a clínica logada."""
     nome_profissional = st.session_state.nome_novo_profissional
@@ -89,7 +86,7 @@ def handle_add_profissional():
         st.warning("O nome do profissional não pode estar em branco.")
 
 def handle_agendamento_submission():
-    """Lida com a criação de um novo agendamento pelo admin da clínica."""
+    """Lida com a criação de um novo agendamento, mas NÃO limpa o form."""
     clinic_id = st.session_state.clinic_id
     cliente = st.session_state.c_nome_input
     profissional = st.session_state.c_prof_input
@@ -119,14 +116,11 @@ def handle_agendamento_submission():
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'status': True}
             st.session_state.data_filtro_agenda = data_consulta
-            st.session_state.c_nome_input, st.session_state.c_tel_input = "", ""
         else:
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
     else:
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': msg_disponibilidade}
-    st.rerun()
-
-
+    
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
     if not prof_id:
@@ -267,11 +261,10 @@ def render_backoffice_clinica():
     # --- SISTEMA DE NAVEGAÇÃO POR ABAS QUE MANTÉM O ESTADO ---
     tab_options = ["🗓️ Agenda e Agendamento", "👥 Gerenciar Profissionais", "⚙️ Configurações da Clínica", "📈 Relatórios"]
     
-    # Este radio irá controlar a navegação e seu estado é salvo no session_state
     active_tab = st.radio(
         "Navegação", 
         tab_options, 
-        key="active_tab",  # Conecta o widget ao session state
+        key="active_tab", 
         horizontal=True, 
         label_visibility="collapsed"
     )
@@ -282,15 +275,20 @@ def render_backoffice_clinica():
         if not nomes_profissionais:
             st.warning("Nenhum profissional cadastrado. Adicione profissionais na aba 'Gerenciar Profissionais' para poder agendar.")
         else:
+            # LÓGICA CORRIGIDA: Exibe a mensagem e limpa o form ANTES de renderizar o form
             if st.session_state.get('last_agendamento_info'):
                 info = st.session_state.last_agendamento_info
                 if info.get('status') is True:
                     st.success(f"Agendado para {info.get('cliente')} com sucesso!")
                     st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}`")
+                    # Limpa os campos do form após o sucesso
+                    st.session_state.c_nome_input = ""
+                    st.session_state.c_tel_input = ""
                 else:
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
+                # Reseta a informação para não aparecer novamente
                 st.session_state.last_agendamento_info = None
-            # O formulário não precisa mais de on_click, pois o botão de submissão causa um rerun
+
             with st.form("admin_form"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -304,6 +302,7 @@ def render_backoffice_clinica():
                 submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary")
                 if submitted:
                     handle_agendamento_submission()
+                    st.rerun() # Garante que a mensagem de status seja exibida imediatamente
 
         st.markdown("---")
         st.header("🗓️ Agenda")
@@ -384,7 +383,6 @@ def render_backoffice_clinica():
                         else:
                             st.text(f"{dia_nome}: Não trabalha")
                     
-                    # O on_click agora só chama a função para mudar o estado de edição
                     st.button("✏️ Editar Horários", key=f"edit_{prof_id}", on_click=entrar_modo_edicao, args=(prof_id,))
 
         st.markdown("---")
