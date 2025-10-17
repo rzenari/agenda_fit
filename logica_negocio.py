@@ -1,4 +1,4 @@
-# logica_negocio.py (VERSÃO MULTI-CLINICA COM CORREÇÃO DE FILTRO DE AGENDA)
+# logica_negocio.py (VERSÃO MULTI-CLINICA COM HORÁRIOS DINÂMICOS)
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -25,7 +25,6 @@ def gerar_token_unico():
     return str(random.randint(100000, 999999))
 
 def horario_esta_disponivel(clinic_id: str, profissional_nome: str, data_hora: datetime):
-    # Esta função agora é um wrapper que chama a lógica mais detalhada
     from database import buscar_agendamentos_por_data_e_profissional # Importação local para evitar ciclo
     
     # 1. Checar se está dentro do horário de trabalho e se não é feriado
@@ -57,7 +56,7 @@ def horario_esta_disponivel(clinic_id: str, profissional_nome: str, data_hora: d
     # 2. Checar se a data é um feriado/folga cadastrado
     from database import listar_feriados
     feriados = listar_feriados(clinic_id)
-    if any(f['data'].date() == data_hora.date() for f in feriados):
+    if any(f['data'] == data_hora.date() for f in feriados):
         return False, "O dia selecionado é um feriado ou folga."
 
     # 3. Checar conflitos com outros agendamentos
@@ -157,4 +156,55 @@ def importar_feriados_nacionais(clinic_id: str, ano: int):
     except requests.RequestException as e:
         print(f"Erro ao buscar feriados da API: {e}")
         return 0
+
+def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_selecionada: date):
+    """
+    Gera uma lista de horários (objetos time) disponíveis para um profissional em uma data.
+    Considera o horário de trabalho, feriados e agendamentos existentes.
+    """
+    from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
+
+    # 1. Checar se a data é um feriado/folga
+    feriados = listar_feriados(clinic_id)
+    if any(f['data'] == data_selecionada for f in feriados):
+        return []
+
+    # 2. Obter horário de trabalho do profissional
+    profissionais = listar_profissionais(clinic_id)
+    profissional_data = next((p for p in profissionais if p['nome'] == profissional_nome), None)
+    if not profissional_data:
+        return []
+
+    horarios_trabalho = profissional_data.get('horario_trabalho', {})
+    dias_map = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
+    dia_key = dias_map[data_selecionada.weekday()]
+    horario_dia = horarios_trabalho.get(dia_key)
+
+    if not horario_dia or not horario_dia.get('ativo'):
+        return []
+
+    # 3. Gerar todos os slots de 30 minutos do dia
+    try:
+        inicio_expediente = datetime.strptime(horario_dia['inicio'], "%H:%M")
+        fim_expediente = datetime.strptime(horario_dia['fim'], "%H:%M")
+    except (ValueError, KeyError):
+        return []
+
+    horarios_possiveis = []
+    horario_atual = inicio_expediente
+    while horario_atual < fim_expediente:
+        horarios_possiveis.append(horario_atual.time())
+        horario_atual += timedelta(minutes=30)
+
+    # 4. Obter horários já agendados
+    agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
+    if not agendamentos_existentes_df.empty:
+        horarios_ocupados = {ag['horario'].time() for _, ag in agendamentos_existentes_df.iterrows() if ag['status'] == 'Confirmado'}
+    else:
+        horarios_ocupados = set()
+
+    # 5. Filtrar e retornar apenas os horários disponíveis
+    horarios_disponiveis = [h for h in horarios_possiveis if h not in horarios_ocupados]
+    
+    return horarios_disponiveis
 
