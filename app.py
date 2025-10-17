@@ -65,7 +65,8 @@ if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_ag
 if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
 if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
-if 'cliente_selecionado_nome' not in st.session_state: st.session_state.cliente_selecionado_nome = None
+# Estado para o novo fluxo de agendamento
+if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
 if 'cliente_selecionado_telefone' not in st.session_state: st.session_state.cliente_selecionado_telefone = ""
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -83,7 +84,7 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'cliente_selecionado_nome', 'cliente_selecionado_telefone']
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'cliente_selecionado_telefone']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -96,27 +97,39 @@ def handle_add_profissional():
         if adicionar_profissional(st.session_state.clinic_id, nome_profissional):
             st.success(f"Profissional '{nome_profissional}' adicionado com sucesso!")
             st.session_state.nome_novo_profissional = ""
-            st.rerun() # Força a atualização da lista
+            st.rerun()
         else:
             st.error("Erro ao adicionar profissional.")
     else:
         st.warning("O nome do profissional não pode estar em branco.")
 
+def handle_selecao_cliente():
+    """Callback para atualizar o telefone quando um cliente é selecionado."""
+    cliente_selecionado = st.session_state.agenda_cliente_select
+    if cliente_selecionado != "Novo Cliente":
+        clientes = listar_clientes(st.session_state.clinic_id)
+        cliente_data = next((c for c in clientes if c['nome'] == cliente_selecionado), None)
+        if cliente_data:
+            st.session_state.cliente_selecionado_telefone = cliente_data.get('telefone', '')
+        else:
+            st.session_state.cliente_selecionado_telefone = ''
+    else:
+        st.session_state.cliente_selecionado_telefone = ''
+
+
 def handle_agendamento_submission():
-    """Lida com a criação de um novo agendamento, lendo dos seletores e do form."""
+    """Lida com a criação de um novo agendamento."""
     clinic_id = st.session_state.clinic_id
     profissional = st.session_state.c_prof_input
     data_consulta = st.session_state.c_data_input
-    cliente_selecionado = st.session_state.c_nome_input
-    
-    # CORREÇÃO: Lógica para obter nome e telefone corretamente
+    cliente_selecionado = st.session_state.agenda_cliente_select
+
     if cliente_selecionado == "Novo Cliente":
         cliente = st.session_state.c_nome_novo_cliente_input
         telefone = st.session_state.c_tel_input
     else:
         cliente = cliente_selecionado
-        # Para clientes existentes, o telefone vem do estado da sessão, não do input desabilitado.
-        telefone = st.session_state.cliente_selecionado_telefone
+        telefone = st.session_state.c_tel_input
 
     hora_consulta = st.session_state.c_hora_input
     servico = st.session_state.c_servico_input
@@ -152,16 +165,15 @@ def handle_agendamento_submission():
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
             st.session_state.data_filtro_agenda = data_consulta
+            # Limpa o estado após o agendamento
+            st.session_state.agenda_cliente_select = "Novo Cliente"
+            st.session_state.cliente_selecionado_telefone = ""
+
         else:
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
     else:
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': msg_disponibilidade}
     
-    st.session_state.c_nome_input = "Novo Cliente"
-    st.session_state.cliente_selecionado_telefone = ""
-    if 'c_nome_novo_cliente_input' in st.session_state:
-        st.session_state.c_nome_novo_cliente_input = ""
-
 
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
@@ -189,8 +201,6 @@ def handle_adicionar_feriado():
     if data and descricao:
         if adicionar_feriado(st.session_state.clinic_id, data, descricao):
             st.success(f"Feriado '{descricao}' em {data.strftime('%d/%m/%Y')} adicionado.")
-            st.session_state.nova_data_feriado = datetime.now(TZ_SAO_PAULO).date()
-            st.session_state.descricao_feriado = ""
             st.rerun()
         else:
             st.error("Erro ao adicionar feriado.")
@@ -248,10 +258,7 @@ def handle_add_cliente():
     if nome and telefone:
         if adicionar_cliente(st.session_state.clinic_id, nome, telefone, obs):
             st.success(f"Cliente '{nome}' adicionado com sucesso!")
-            st.session_state.nome_novo_cliente = ""
-            st.session_state.tel_novo_cliente = ""
-            st.session_state.obs_novo_cliente = ""
-            st.rerun() # Força a atualização da lista
+            st.rerun()
         else:
             st.error("Erro ao adicionar cliente.")
     else:
@@ -263,15 +270,12 @@ def handle_add_servico():
     if nome and duracao > 0:
         if adicionar_servico(st.session_state.clinic_id, nome, duracao):
             st.success(f"Serviço '{nome}' adicionado com sucesso!")
-            st.session_state.nome_novo_servico = ""
-            st.session_state.duracao_novo_servico = 30
-            st.rerun() # Força a atualização da lista
+            st.rerun()
         else:
             st.error("Erro ao adicionar serviço.")
     else:
         st.warning("Nome do serviço e duração maior que zero são obrigatórios.")
 
-# --- NOVAS FUNÇÕES HANDLER PARA REMOÇÃO ---
 def handle_remove_profissional(clinic_id: str, prof_id: str):
     if db_remover_profissional(clinic_id, prof_id):
         st.success("Profissional removido com sucesso!")
@@ -407,18 +411,35 @@ def render_backoffice_clinica():
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
 
-            # --- CORREÇÃO: LÓGICA PARA ATUALIZAR TELEFONE DO CLIENTE (MOVIDA PARA FORA DO FORM) ---
-            cliente_selecionado_agora = st.session_state.get("c_nome_input")
-            if cliente_selecionado_agora and cliente_selecionado_agora != "Novo Cliente":
-                cliente_data = next((c for c in clientes_clinica if c['nome'] == cliente_selecionado_agora), None)
-                if cliente_data:
-                    st.session_state.cliente_selecionado_telefone = cliente_data.get('telefone', '')
-                else:
-                    st.session_state.cliente_selecionado_telefone = '' 
-            else:
-                 st.session_state.cliente_selecionado_telefone = ''
+            # --- NOVO FLUXO DE AGENDAMENTO ---
+            st.subheader("1. Selecione o Cliente")
+            opcoes_clientes = ["Novo Cliente"] + [c['nome'] for c in clientes_clinica]
+            st.selectbox(
+                "Cliente:",
+                options=opcoes_clientes,
+                key="agenda_cliente_select",
+                on_change=handle_selecao_cliente
+            )
 
+            st.subheader("2. Preencha os Detalhes do Agendamento")
             with st.form("admin_form"):
+                
+                # Exibição dos dados do cliente
+                if st.session_state.agenda_cliente_select == "Novo Cliente":
+                    col_nome, col_tel = st.columns(2)
+                    col_nome.text_input("Nome do Novo Cliente", key="c_nome_novo_cliente_input")
+                    col_tel.text_input("Telefone", key="c_tel_input")
+                else:
+                    st.markdown(f"**Agendando para:** {st.session_state.agenda_cliente_select}")
+                    st.text_input(
+                        "Telefone (edite se necessário)", 
+                        key="c_tel_input", 
+                        value=st.session_state.cliente_selecionado_telefone
+                    )
+                
+                st.divider()
+
+                # Restante dos campos do agendamento
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
                 form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
@@ -432,16 +453,6 @@ def render_backoffice_clinica():
                 else:
                     form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
                     pode_agendar = False
-                
-                opcoes_clientes = ["Novo Cliente"] + [c['nome'] for c in clientes_clinica]
-                # CORREÇÃO: Removido o on_change para evitar o erro do Streamlit
-                form_cols[0].selectbox("Cliente:", options=opcoes_clientes, key="c_nome_input")
-
-                if st.session_state.c_nome_input == "Novo Cliente":
-                    form_cols[0].text_input("Nome do Novo Cliente:", key="c_nome_novo_cliente_input")
-                    form_cols[2].text_input("Telefone:", key="c_tel_input", value=st.session_state.cliente_selecionado_telefone)
-                else:
-                    form_cols[2].text_input("Telefone:", key="c_tel_input", value=st.session_state.cliente_selecionado_telefone, disabled=True)
 
                 st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, use_container_width=True, on_click=handle_agendamento_submission)
 
@@ -615,7 +626,6 @@ def render_backoffice_clinica():
             df_clientes = pd.DataFrame(clientes_clinica)
             st.dataframe(df_clientes[['nome', 'telefone', 'observacoes']], use_container_width=True)
             
-            # Usando um selectbox para escolher o cliente a ser removido para evitar múltiplos botões
             cliente_para_remover_nome = st.selectbox("Selecione um cliente para remover", options=[""] + [c['nome'] for c in clientes_clinica], key="cliente_remover_select")
             if cliente_para_remover_nome:
                 cliente_id_remover = next((c['id'] for c in clientes_clinica if c['nome'] == cliente_para_remover_nome), None)
