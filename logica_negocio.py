@@ -62,8 +62,13 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
 
     agendamentos_existentes = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_hora_inicio.date())
     
-    # Filtra apenas agendamentos individuais para checagem de conflito
-    agendamentos_individuais = agendamentos_existentes[agendamentos_existentes['turma_id'].isnull()]
+    # CORREÇÃO: Verifica se a coluna 'turma_id' existe antes de filtrar.
+    # Se não existir, todos os agendamentos são considerados individuais.
+    if agendamentos_existentes.empty or 'turma_id' not in agendamentos_existentes.columns:
+        agendamentos_individuais = agendamentos_existentes.copy()
+    else:
+        agendamentos_individuais = agendamentos_existentes[agendamentos_existentes['turma_id'].isnull()]
+
 
     if agendamento_id_excluir and not agendamentos_individuais.empty:
         agendamentos_individuais = agendamentos_individuais[agendamentos_individuais['id'] != agendamento_id_excluir]
@@ -186,7 +191,13 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         return []
 
     agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
-    agendamentos_individuais_df = agendamentos_existentes_df[agendamentos_existentes_df['turma_id'].isnull()]
+    
+    # CORREÇÃO: Verifica se a coluna 'turma_id' existe antes de filtrar.
+    # Se não existir, todos os agendamentos são considerados individuais.
+    if agendamentos_existentes_df.empty or 'turma_id' not in agendamentos_existentes_df.columns:
+        agendamentos_individuais_df = agendamentos_existentes_df.copy()
+    else:
+        agendamentos_individuais_df = agendamentos_existentes_df[agendamentos_existentes_df['turma_id'].isnull()]
     
     if agendamento_id_excluir and not agendamentos_individuais_df.empty:
         agendamentos_individuais_df = agendamentos_individuais_df[agendamentos_individuais_df['id'] != agendamento_id_excluir]
@@ -327,3 +338,4 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
+
