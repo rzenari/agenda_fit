@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA - COMPLETA E RESTAURADA)
+# app.py (VERSÃO MULTI-CLINICA COM GESTÃO DE HORÁRIOS E FERIADOS)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -13,7 +13,11 @@ from database import (
     adicionar_profissional,
     remover_profissional,
     salvar_agendamento,
-    buscar_agendamento_por_pin
+    buscar_agendamento_por_pin,
+    atualizar_horario_profissional,
+    adicionar_feriado,
+    listar_feriados,
+    remover_feriado
 )
 from logica_negocio import (
     gerar_token_unico,
@@ -22,12 +26,14 @@ from logica_negocio import (
     get_relatorio_no_show,
     acao_admin_agendamento,
     buscar_agendamentos_por_data,
-    processar_remarcacao
+    processar_remarcacao,
+    importar_feriados_nacionais
 )
 
 # --- Configuração ---
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
+DIAS_SEMANA = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta", "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
 
 # Inicialização do DB
 db_client = get_firestore_client()
@@ -35,24 +41,17 @@ if db_client is None:
     st.stop()
 
 # --- INICIALIZAÇÃO DO SESSION STATE ---
-if 'remarcando' not in st.session_state:
-    st.session_state.remarcando = False
-if 'agendamentos_selecionados' not in st.session_state:
-    st.session_state.agendamentos_selecionados = {}
-if 'remarcacao_status' not in st.session_state:
-    st.session_state.remarcacao_status = None
-if "clinic_id" not in st.session_state:
-    st.session_state.clinic_id = None
-if "clinic_name" not in st.session_state:
-    st.session_state.clinic_name = None
-if 'data_filtro_agenda' not in st.session_state:
-    st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
-if 'last_agendamento_info' not in st.session_state:
-    st.session_state.last_agendamento_info = None
+if 'remarcando' not in st.session_state: st.session_state.remarcando = False
+if 'agendamentos_selecionados' not in st.session_state: st.session_state.agendamentos_selecionados = {}
+if 'remarcacao_status' not in st.session_state: st.session_state.remarcacao_status = None
+if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
+if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
+if 'data_filtro_agenda' not in st.session_state: st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
+if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
+if 'profissional_selecionado_config' not in st.session_state: st.session_state.profissional_selecionado_config = None
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
-
 def handle_login():
     """Tenta autenticar a clínica."""
     username = st.session_state.login_username
@@ -67,8 +66,10 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    st.session_state.clinic_id = None
-    st.session_state.clinic_name = None
+    keys_to_clear = ['clinic_id', 'clinic_name', 'profissional_selecionado_config']
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
     st.rerun()
 
 def handle_add_profissional():
@@ -92,13 +93,16 @@ def handle_agendamento_submission():
     hora_consulta = st.session_state.c_hora_input
 
     if not cliente or not profissional:
-        st.warning("Cliente e Profissional são obrigatórios.")
+        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Cliente e Profissional são obrigatórios."}
+        st.rerun()
         return
 
     dt_consulta_naive = datetime.combine(data_consulta, hora_consulta)
     dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
+    
+    disponivel, msg_disponibilidade = horario_esta_disponivel(clinic_id, profissional, dt_consulta_local)
 
-    if horario_esta_disponivel(clinic_id, profissional, dt_consulta_local):
+    if disponivel:
         pin_code = gerar_token_unico()
         dados = {
             'profissional_nome': profissional,
@@ -116,16 +120,56 @@ def handle_agendamento_submission():
         else:
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
     else:
-        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Horário já ocupado! Tente outro."}
+        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': msg_disponibilidade}
     st.rerun()
 
+def handle_salvar_horarios_profissional():
+    """Salva a configuração de horários de um profissional."""
+    prof_id = st.session_state.profissional_selecionado_config
+    if not prof_id:
+        st.error("Nenhum profissional selecionado.")
+        return
+    
+    horarios = {}
+    for dia_key, dia_nome in DIAS_SEMANA.items():
+        horarios[dia_key] = {
+            "ativo": st.session_state[f"ativo_{dia_key}_{prof_id}"],
+            "inicio": st.session_state[f"inicio_{dia_key}_{prof_id}"].strftime("%H:%M"),
+            "fim": st.session_state[f"fim_{dia_key}_{prof_id}"].strftime("%H:%M")
+        }
+    
+    if atualizar_horario_profissional(st.session_state.clinic_id, prof_id, horarios):
+        st.success("Horários de trabalho atualizados com sucesso!")
+    else:
+        st.error("Falha ao atualizar horários.")
+
+def handle_adicionar_feriado():
+    """Adiciona um novo feriado ou folga para a clínica."""
+    data = st.session_state.nova_data_feriado
+    descricao = st.session_state.descricao_feriado
+    if data and descricao:
+        if adicionar_feriado(st.session_state.clinic_id, data, descricao):
+            st.success(f"Feriado '{descricao}' em {data.strftime('%d/%m/%Y')} adicionado.")
+        else:
+            st.error("Erro ao adicionar feriado.")
+    else:
+        st.warning("Data e Descrição são obrigatórias.")
+
+def handle_importar_feriados():
+    """Importa feriados nacionais para a clínica."""
+    ano = st.session_state.ano_importacao
+    count = importar_feriados_nacionais(st.session_state.clinic_id, ano)
+    if count > 0:
+        st.success(f"{count} feriados nacionais de {ano} importados com sucesso!")
+    else:
+        st.warning(f"Não foi possível importar feriados para {ano}. Verifique se já não foram importados.")
+
+# (As demais funções handle, como remarcação, cancelamento, etc., permanecem as mesmas)
 def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
-    """Lida com a confirmação de uma remarcação pelo cliente."""
     nova_data = st.session_state.nova_data_remarcacao
     nova_hora = st.session_state.nova_hora_remarcacao
     novo_horario_naive = datetime.combine(nova_data, nova_hora)
     novo_horario_local = novo_horario_naive.replace(tzinfo=TZ_SAO_PAULO)
-
     sucesso, mensagem = processar_remarcacao(pin, agendamento_id, profissional_nome, novo_horario_local)
     st.session_state.remarcacao_status = {'sucesso': sucesso, 'mensagem': mensagem}
     if sucesso:
@@ -133,28 +177,25 @@ def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
     st.rerun()
 
 def handle_cancelar_selecionados():
-    """Cancela todos os agendamentos selecionados pelo admin."""
     ids_para_cancelar = [ag_id for ag_id, selecionado in st.session_state.agendamentos_selecionados.items() if selecionado]
     if not ids_para_cancelar:
         st.warning("Nenhum agendamento selecionado.")
         return
-    
     sucessos = 0
     for ag_id in ids_para_cancelar:
         if acao_admin_agendamento(ag_id, "cancelar"):
             sucessos += 1
-    
     st.success(f"{sucessos} de {len(ids_para_cancelar)} agendamentos cancelados com sucesso.")
     st.session_state.agendamentos_selecionados.clear()
     st.rerun()
 
 def handle_admin_action(id_agendamento: str, acao: str):
-    """Lida com cliques nos botões de ação do admin."""
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
         st.rerun()
     else:
         st.error("Falha ao registrar a ação no sistema.")
+
 
 # --- RENDERIZAÇÃO DAS PÁGINAS ---
 
@@ -169,8 +210,8 @@ def render_login_page():
 
 def render_agendamento_seguro():
     """Renderiza a página de gestão do cliente (acessada via PIN)."""
+    # (Esta função permanece a mesma da versão anterior, sem alterações necessárias)
     st.title("🔒 Gestão do seu Agendamento")
-
     if st.session_state.remarcacao_status:
         status = st.session_state.remarcacao_status
         if status['sucesso']:
@@ -178,26 +219,21 @@ def render_agendamento_seguro():
         else:
             st.error(status['mensagem'])
         st.session_state.remarcacao_status = None
-
     pin = st.query_params.get("pin")
     if not pin:
         st.error("Link inválido ou PIN não fornecido.")
         return
-
     agendamento = buscar_agendamento_por_pin(pin)
     if not agendamento:
         st.error("PIN de agendamento inválido ou expirado.")
         return
-
     if agendamento['status'] != "Confirmado":
         st.warning(f"Este agendamento já se encontra com o status: **{agendamento['status']}**.")
         return
-    
     st.info(f"Seu agendamento com **{agendamento['profissional_nome']}** está CONFIRMADO para:")
     st.subheader(f"{agendamento['horario'].strftime('%d/%m/%Y')} às {agendamento['horario'].strftime('%H:%M')}")
     st.caption(f"Cliente: {agendamento['cliente']}")
     st.markdown("---")
-
     if st.session_state.remarcando:
         with st.form("form_remarcacao"):
             st.subheader("Selecione o novo horário")
@@ -215,7 +251,6 @@ def render_agendamento_seguro():
                 st.success("Agendamento cancelado com sucesso.")
             else:
                 st.error("Erro ao cancelar.")
-        
         if col2.button("🔄 REMARCAR HORÁRIO", use_container_width=True):
             st.session_state.remarcando = True
             st.rerun()
@@ -230,9 +265,11 @@ def render_backoffice_clinica():
     profissionais_clinica = listar_profissionais(clinic_id)
     nomes_profissionais = [p['nome'] for p in profissionais_clinica]
 
-    tab1, tab2, tab3 = st.tabs(["Agenda e Agendamento", "Gerenciar Profissionais", "Relatórios"])
+    # Alteração: Adicionada nova aba de Configurações
+    tab1, tab2, tab3, tab4 = st.tabs(["Agenda e Agendamento", "Gerenciar Profissionais", "Configurações da Clínica", "Relatórios"])
 
     with tab1:
+        # Conteúdo da aba de agendamento (permanece o mesmo da versão anterior)
         st.header("📝 Agendamento Rápido e Manual")
         if not nomes_profissionais:
             st.warning("Nenhum profissional cadastrado. Adicione profissionais na aba 'Gerenciar Profissionais' para poder agendar.")
@@ -245,7 +282,6 @@ def render_backoffice_clinica():
                 else:
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
-
             with st.form("admin_form"):
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -257,36 +293,32 @@ def render_backoffice_clinica():
                 with col3:
                     st.time_input("Hora:", key="c_hora_input", step=timedelta(minutes=30))
                     st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", on_click=handle_agendamento_submission)
-        
         st.markdown("---")
         st.header("🗓️ Agenda")
         data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
         agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
-
         if not agenda_do_dia.empty:
             for index, row in agenda_do_dia.iterrows():
                 ag_id = row['id']
                 cols = st.columns([0.1, 0.4, 0.3, 0.1, 0.1, 0.1])
                 selecionado = cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
-                
                 cols[1].write(f"**{row['cliente']}**")
                 cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
                 cols[3].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
                 cols[4].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
                 cols[5].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
-
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
             st.info(f"Nenhuma consulta confirmada para {data_selecionada.strftime('%d/%m/%Y')}.")
 
     with tab2:
+        # Conteúdo da aba de profissionais (permanece o mesmo da versão anterior)
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
             st.form_submit_button("Adicionar", on_click=handle_add_profissional)
-
         st.markdown("---")
         st.subheader("Profissionais Cadastrados")
         if profissionais_clinica:
@@ -298,6 +330,58 @@ def render_backoffice_clinica():
             st.info("Nenhum profissional cadastrado.")
 
     with tab3:
+        # --- NOVO PAINEL DE CONFIGURAÇÕES ---
+        st.header("⚙️ Configurações da Clínica")
+        st.subheader("Horários de Trabalho dos Profissionais")
+
+        if not profissionais_clinica:
+            st.info("Cadastre profissionais na aba 'Gerenciar Profissionais' para definir seus horários.")
+        else:
+            prof_dict = {p['nome']: p['id'] for p in profissionais_clinica}
+            prof_selecionado_nome = st.selectbox("Selecione um profissional para configurar", options=prof_dict.keys())
+            
+            if prof_selecionado_nome:
+                prof_id = prof_dict[prof_selecionado_nome]
+                st.session_state.profissional_selecionado_config = prof_id
+                
+                # Encontra os dados do profissional selecionado
+                prof_data = next((p for p in profissionais_clinica if p['id'] == prof_id), None)
+                horarios_salvos = prof_data.get('horario_trabalho', {})
+
+                with st.form(key=f"form_horarios_{prof_id}"):
+                    for dia_key, dia_nome in DIAS_SEMANA.items():
+                        horario_dia = horarios_salvos.get(dia_key, {"ativo": False, "inicio": "09:00", "fim": "18:00"})
+                        cols = st.columns([0.2, 0.4, 0.4])
+                        cols[0].checkbox(dia_nome, key=f"ativo_{dia_key}_{prof_id}", value=horario_dia['ativo'])
+                        cols[1].time_input("Início", key=f"inicio_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['inicio'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
+                        cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
+                    st.form_submit_button("Salvar Horários", on_click=handle_salvar_horarios_profissional)
+
+        st.markdown("---")
+        st.subheader("Feriados e Folgas")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.form("add_feriado_form"):
+                st.date_input("Data do Feriado/Folga", key="nova_data_feriado")
+                st.text_input("Descrição", key="descricao_feriado", placeholder="Ex: Feriado Municipal")
+                st.form_submit_button("Adicionar Data Bloqueada", on_click=handle_adicionar_feriado)
+        with col2:
+            st.write("Importar Feriados Nacionais (Brasil)")
+            st.number_input("Ano", min_value=datetime.now().year, max_value=datetime.now().year + 5, key="ano_importacao", label_visibility="collapsed")
+            st.button("Importar Feriados do Ano", on_click=handle_importar_feriados)
+
+        feriados = listar_feriados(clinic_id)
+        if feriados:
+            st.write("Datas bloqueadas cadastradas:")
+            for feriado in feriados:
+                c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
+                c1.write(feriado['data'].strftime('%d/%m/%Y'))
+                c2.write(feriado['descricao'])
+                c3.button("Remover", key=f"del_feriado_{feriado['id']}", on_click=remover_feriado, args=(clinic_id, feriado['id']))
+
+    with tab4:
+        # Conteúdo da aba de relatórios (permanece o mesmo da versão anterior)
         st.header("📈 Relatórios de Faltas (No-Show)")
         df_relatorio = get_relatorio_no_show(clinic_id)
         if not df_relatorio.empty:
