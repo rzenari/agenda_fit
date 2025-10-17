@@ -1,4 +1,4 @@
-# database.py (VERSÃO MULTI-CLINICA)
+# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIÇOS)
 
 import streamlit as st
 import pandas as pd
@@ -73,7 +73,7 @@ def remover_profissional(clinic_id: str, profissional_id: str):
     try:
         db.collection('clinicas').document(clinic_id).collection('profissionais').document(profissional_id).delete()
         st.success("Profissional removido com sucesso!")
-        st.rerun() # Força a atualização da lista
+        st.rerun() 
     except Exception as e:
         print(f"ERRO AO REMOVER PROFISSIONAL: {e}")
         st.error("Erro ao remover profissional.")
@@ -99,8 +99,9 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'profissional_nome': dados['profissional_nome'],
             'cliente': dados['cliente'],
             'telefone': dados['telefone'],
-            'horario': dados['horario'],  # Já deve estar com timezone
+            'horario': dados['horario'],
             'status': "Confirmado",
+            'servico_nome': dados.get('servico_nome', 'Não especificado'), # Salva o nome do serviço
         }
         agendamentos_ref.add(data_para_salvar)
         return True
@@ -116,7 +117,6 @@ def buscar_agendamento_por_pin(pin_code: str):
             data = doc.to_dict()
             data['id'] = doc.id
             if 'horario' in data and isinstance(data['horario'], datetime):
-                # Converte de UTC (armazenado) para o fuso de São Paulo para exibição
                 data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
             return data
         return None
@@ -124,10 +124,18 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
         return None
 
-def buscar_todos_agendamentos_clinica(clinic_id: str):
-    """Busca todos os agendamentos de uma clínica e retorna um DataFrame."""
+def buscar_agendamentos_intervalo(clinic_id: str, start_date: date, end_date: date):
+    """Busca todos os agendamentos de uma clínica dentro de um intervalo de datas."""
     try:
-        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
+        start_dt_naive = datetime.combine(start_date, time.min)
+        end_dt_naive = datetime.combine(end_date, time.max)
+        
+        start_dt_utc = TZ_SAO_PAULO.localize(start_dt_naive).astimezone(ZoneInfo('UTC'))
+        end_dt_utc = TZ_SAO_PAULO.localize(end_dt_naive).astimezone(ZoneInfo('UTC'))
+
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
+                                             .where(filter=FieldFilter('horario', '>=', start_dt_utc))\
+                                             .where(filter=FieldFilter('horario', '<=', end_dt_utc))
         docs = query.stream()
         data = []
         for doc in docs:
@@ -138,7 +146,7 @@ def buscar_todos_agendamentos_clinica(clinic_id: str):
             data.append(item)
         return pd.DataFrame(data)
     except Exception as e:
-        print(f"ERRO NA BUSCA TOTAL DA CLÍNICA: {e}")
+        print(f"ERRO NA BUSCA DE AGENDAMENTOS POR INTERVALO: {e}")
         return pd.DataFrame()
 
 def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nome: str, data_selecionada: date):
@@ -182,7 +190,6 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
     """Atualiza o horário de um agendamento (usado na remarcação)."""
     try:
         doc_ref = db.collection('agendamentos').document(id_agendamento)
-        # O horário deve ser salvo em UTC
         novo_horario_utc = novo_horario.astimezone(ZoneInfo('UTC'))
         doc_ref.update({'horario': novo_horario_utc})
         return True
@@ -195,9 +202,8 @@ def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
     """Adiciona um feriado ou folga para uma clínica."""
     try:
         feriados_ref = db.collection('clinicas').document(clinic_id).collection('feriados')
-        # Armazena a data como um objeto datetime no início do dia para facilitar consultas
         data_dt = datetime.combine(data_feriado, time.min)
-        feriados_ref.add({'data': data_dt, 'descricao': descricao, 'clinic_id': clinic_id})
+        feriados_ref.add({'data': data_dt, 'descricao': descricao})
         return True
     except Exception as e:
         print(f"ERRO AO ADICIONAR FERIADO: {e}")
@@ -207,14 +213,13 @@ def listar_feriados(clinic_id: str):
     """Lista todos os feriados de uma clínica, ordenados por data."""
     try:
         feriados_ref = db.collection('clinicas').document(clinic_id).collection('feriados')
-        # A consulta agora é mais simples e não requer índice composto
         docs = feriados_ref.order_by('data').stream()
         feriados = []
         for doc in docs:
             feriado = doc.to_dict()
             feriado['id'] = doc.id
             if 'data' in feriado and isinstance(feriado['data'], datetime):
-                feriado['data'] = feriado['data'].date() # Retorna apenas a data
+                feriado['data'] = feriado['data'].date()
             feriados.append(feriado)
         return feriados
     except Exception as e:
@@ -230,3 +235,74 @@ def remover_feriado(clinic_id: str, feriado_id: str):
         st.error("Erro ao remover feriado.")
         print(f"ERRO AO REMOVER FERIADO: {e}")
 
+# --- NOVAS FUNÇÕES: GESTÃO DE CLIENTES ---
+def listar_clientes(clinic_id: str):
+    """Lista todos os clientes de uma clínica."""
+    try:
+        clientes_ref = db.collection('clinicas').document(clinic_id).collection('clientes')
+        docs = clientes_ref.order_by('nome').stream()
+        clientes = []
+        for doc in docs:
+            cliente = doc.to_dict()
+            cliente['id'] = doc.id
+            clientes.append(cliente)
+        return clientes
+    except Exception as e:
+        print(f"ERRO AO LISTAR CLIENTES: {e}")
+        return []
+
+def adicionar_cliente(clinic_id: str, nome: str, telefone: str, observacoes: str):
+    """Adiciona um novo cliente a uma clínica."""
+    try:
+        clientes_ref = db.collection('clinicas').document(clinic_id).collection('clientes')
+        clientes_ref.add({'nome': nome, 'telefone': telefone, 'observacoes': observacoes})
+        return True
+    except Exception as e:
+        print(f"ERRO AO ADICIONAR CLIENTE: {e}")
+        return False
+
+def remover_cliente(clinic_id: str, cliente_id: str):
+    """Remove um cliente de uma clínica."""
+    try:
+        db.collection('clinicas').document(clinic_id).collection('clientes').document(cliente_id).delete()
+        st.success("Cliente removido com sucesso!")
+        st.rerun()
+    except Exception as e:
+        print(f"ERRO AO REMOVER CLIENTE: {e}")
+        st.error("Erro ao remover cliente.")
+
+# --- NOVAS FUNÇÕES: GESTÃO DE SERVIÇOS ---
+def listar_servicos(clinic_id: str):
+    """Lista todos os serviços de uma clínica."""
+    try:
+        servicos_ref = db.collection('clinicas').document(clinic_id).collection('servicos')
+        docs = servicos_ref.order_by('nome').stream()
+        servicos = []
+        for doc in docs:
+            servico = doc.to_dict()
+            servico['id'] = doc.id
+            servicos.append(servico)
+        return servicos
+    except Exception as e:
+        print(f"ERRO AO LISTAR SERVIÇOS: {e}")
+        return []
+
+def adicionar_servico(clinic_id: str, nome: str, duracao_min: int):
+    """Adiciona um novo serviço a uma clínica."""
+    try:
+        servicos_ref = db.collection('clinicas').document(clinic_id).collection('servicos')
+        servicos_ref.add({'nome': nome, 'duracao_min': duracao_min})
+        return True
+    except Exception as e:
+        print(f"ERRO AO ADICIONAR SERVIÇO: {e}")
+        return False
+
+def remover_servico(clinic_id: str, servico_id: str):
+    """Remove um serviço de uma clínica."""
+    try:
+        db.collection('clinicas').document(clinic_id).collection('servicos').document(servico_id).delete()
+        st.success("Serviço removido com sucesso!")
+        st.rerun()
+    except Exception as e:
+        print(f"ERRO AO REMOVER SERVIÇO: {e}")
+        st.error("Erro ao remover serviço.")
