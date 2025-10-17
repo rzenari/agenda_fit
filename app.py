@@ -56,34 +56,23 @@ if db_client is None:
     st.stop()
 
 # --- INICIALIZAÇÃO DO SESSION STATE ---
-if 'remarcando' not in st.session_state:
-    st.session_state.remarcando = False
-if 'agendamentos_selecionados' not in st.session_state:
-    st.session_state.agendamentos_selecionados = {}
-if 'remarcacao_status' not in st.session_state:
-    st.session_state.remarcacao_status = None
-if "clinic_id" not in st.session_state:
-    st.session_state.clinic_id = None
-if "clinic_name" not in st.session_state:
-    st.session_state.clinic_name = None
-if 'data_filtro_agenda' not in st.session_state:
-    st.session_state.data_filtro_agenda = datetime.now(TZ_SAO_PAULO).date()
-if 'last_agendamento_info' not in st.session_state:
-    st.session_state.last_agendamento_info = None
-if 'editando_horario_id' not in st.session_state:
-    st.session_state.editando_horario_id = None
-if 'active_tab' not in st.session_state:
-    st.session_state.active_tab = "🗓️ Agenda e Agendamento"
+if 'remarcando' not in st.session_state: st.session_state.remarcando = False
+if 'agendamentos_selecionados' not in st.session_state: st.session_state.agendamentos_selecionados = {}
+if 'remarcacao_status' not in st.session_state: st.session_state.remarcacao_status = None
+if "clinic_id" not in st.session_state: st.session_state.clinic_id = None
+if "clinic_name" not in st.session_state: st.session_state.clinic_name = None
+# CORREÇÃO: Unificar o estado da data para evitar dessincronização
+if 'data_selecionada' not in st.session_state:
+    st.session_state.data_selecionada = datetime.now(TZ_SAO_PAULO).date()
+if 'last_agendamento_info' not in st.session_state: st.session_state.last_agendamento_info = None
+if 'editando_horario_id' not in st.session_state: st.session_state.editando_horario_id = None
+if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
 # Estado para o novo fluxo de agendamento
-if 'agenda_cliente_select' not in st.session_state:
-    st.session_state.agenda_cliente_select = "Novo Cliente"
-if 'c_tel_input' not in st.session_state:
-    st.session_state.c_tel_input = ""
+if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
+if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
 # Estado para o diálogo de confirmação
-if 'confirmando_agendamento' not in st.session_state:
-    st.session_state.confirmando_agendamento = False
-if 'detalhes_agendamento' not in st.session_state:
-    st.session_state.detalhes_agendamento = {}
+if 'confirmando_agendamento' not in st.session_state: st.session_state.confirmando_agendamento = False
+if 'detalhes_agendamento' not in st.session_state: st.session_state.detalhes_agendamento = {}
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -101,7 +90,7 @@ def handle_login():
 
 def handle_logout():
     """Limpa a sessão e desloga a clínica."""
-    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento', 'detalhes_agendamento']
+    keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id', 'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento', 'detalhes_agendamento', 'data_selecionada']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -152,7 +141,7 @@ def handle_pre_agendamento():
         'telefone': telefone,
         'profissional': st.session_state.c_prof_input,
         'servico': st.session_state.c_servico_input,
-        'data': st.session_state.c_data_input,
+        'data': st.session_state.data_selecionada, # Usar estado unificado
         'hora': hora_consulta,
         'cliente_era_novo': cliente_selecionado == "Novo Cliente"
     }
@@ -193,7 +182,7 @@ def handle_agendamento_submission():
 
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
-            st.session_state.data_filtro_agenda = detalhes['data']
+            st.session_state.data_selecionada = detalhes['data']
         else:
             st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'status': str(resultado)}
     else:
@@ -204,6 +193,7 @@ def handle_agendamento_submission():
     st.session_state.c_tel_input = ""
     st.session_state.confirmando_agendamento = False
     st.session_state.detalhes_agendamento = {}
+    st.rerun()
 
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
@@ -448,7 +438,6 @@ def render_backoffice_clinica():
             c1, c2 = st.columns(2)
             if c1.button("✅ Confirmar Agendamento", type="primary"):
                 handle_agendamento_submission()
-                st.rerun()
             if c2.button("❌ Voltar"):
                 st.session_state.confirmando_agendamento = False
                 st.rerun()
@@ -488,8 +477,8 @@ def render_backoffice_clinica():
 
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
-                # CORREÇÃO: Removido o callback on_change que estava causando o erro.
-                form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
+                # CORREÇÃO: Usar a chave unificada 'data_selecionada'
+                form_cols[1].date_input("Data:", key="data_selecionada", min_value=date.today())
                 form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
 
                 servico_selecionado_nome = st.session_state.c_servico_input
@@ -499,7 +488,7 @@ def render_backoffice_clinica():
                 horarios_disponiveis = gerar_horarios_disponiveis(
                     clinic_id, 
                     st.session_state.c_prof_input, 
-                    st.session_state.c_data_input,
+                    st.session_state.data_selecionada, # Usar estado unificado
                     duracao_servico
                 )
                 
@@ -515,19 +504,13 @@ def render_backoffice_clinica():
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
         
-        # --- NOVA LÓGICA DE SINCRONIZAÇÃO ---
-        # Se a data no formulário de agendamento (c_data_input) foi alterada,
-        # atualiza a data do filtro da agenda (data_filtro_agenda) para refletir a mudança.
-        # Isso substitui o callback que causava o erro.
-        if 'c_data_input' in st.session_state and st.session_state.data_filtro_agenda != st.session_state.c_data_input:
-            st.session_state.data_filtro_agenda = st.session_state.c_data_input
-            st.rerun()
-
         view_tab1, view_tab2, view_tab3 = st.tabs(["Visão Diária (Lista)", "Visão Semanal (Profissional)", "Visão Comparativa (Diária)"])
 
         with view_tab1:
-            data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
-            agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
+            # CORREÇÃO: Usar a chave unificada 'data_selecionada' para manter a sincronia
+            st.date_input("Filtrar por data:", key='data_selecionada', format="DD/MM/YYYY")
+            agenda_do_dia = buscar_agendamentos_por_data(clinic_id, st.session_state.data_selecionada)
+            
             if not agenda_do_dia.empty:
                 header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
                 header_cols[1].markdown("**Cliente / Serviço**")
@@ -575,7 +558,7 @@ def render_backoffice_clinica():
                 if any(st.session_state.agendamentos_selecionados.values()):
                     st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
             else:
-                st.info(f"Nenhuma consulta confirmada para {data_selecionada.strftime('%d/%m/%Y')}.")
+                st.info(f"Nenhuma consulta confirmada para {st.session_state.data_selecionada.strftime('%d/%m/%Y')}.")
 
         with view_tab2:
             st.subheader("Agenda Semanal por Profissional")
