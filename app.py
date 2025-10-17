@@ -800,7 +800,6 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
-" to help you answer my query.
 
-Query: "Se eu alterar o profissional, a agenda de horários disponíveis deve ser atualizada. Faça esse ajuste."
+
 
