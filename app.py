@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM HORÁRIOS DINÂMICOS)
+# app.py (VERSÃO MULTI-CLINICA COM CORREÇÃO NO FORM DE ADICIONAR PROFISSIONAL)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -356,9 +356,8 @@ def render_backoffice_clinica():
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
-            submitted = st.form_submit_button("Adicionar")
-            if submitted:
-                handle_add_profissional()
+            # CORREÇÃO: Usar on_click para evitar o StreamlitAPIException
+            st.form_submit_button("Adicionar", on_click=handle_add_profissional)
 
         st.markdown("---")
         st.subheader("Profissionais Cadastrados")
