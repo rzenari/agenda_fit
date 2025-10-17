@@ -69,14 +69,13 @@ def adicionar_profissional(clinic_id: str, nome: str):
         return False
 
 def remover_profissional(clinic_id: str, profissional_id: str):
-    """Remove um profissional de uma clínica."""
+    """Remove um profissional de uma clínica e retorna True/False."""
     try:
         db.collection('clinicas').document(clinic_id).collection('profissionais').document(profissional_id).delete()
-        st.success("Profissional removido com sucesso!")
-        st.rerun() 
+        return True
     except Exception as e:
         print(f"ERRO AO REMOVER PROFISSIONAL: {e}")
-        st.error("Erro ao remover profissional.")
+        return False
 
 def atualizar_horario_profissional(clinic_id: str, prof_id: str, horarios: dict):
     """Atualiza a configuração de horário de um profissional."""
@@ -241,13 +240,13 @@ def listar_feriados(clinic_id: str):
         return []
 
 def remover_feriado(clinic_id: str, feriado_id: str):
-    """Remove um feriado de uma clínica."""
+    """Remove um feriado de uma clínica e retorna True/False."""
     try:
         db.collection('clinicas').document(clinic_id).collection('feriados').document(feriado_id).delete()
-        st.rerun()
+        return True
     except Exception as e:
-        st.error("Erro ao remover feriado.")
         print(f"ERRO AO REMOVER FERIADO: {e}")
+        return False
 
 # --- NOVAS FUNÇÕES: GESTÃO DE CLIENTES ---
 def listar_clientes(clinic_id: str):
@@ -276,14 +275,13 @@ def adicionar_cliente(clinic_id: str, nome: str, telefone: str, observacoes: str
         return False
 
 def remover_cliente(clinic_id: str, cliente_id: str):
-    """Remove um cliente de uma clínica."""
+    """Remove um cliente de uma clínica e retorna True/False."""
     try:
         db.collection('clinicas').document(clinic_id).collection('clientes').document(cliente_id).delete()
-        st.success("Cliente removido com sucesso!")
-        st.rerun()
+        return True
     except Exception as e:
         print(f"ERRO AO REMOVER CLIENTE: {e}")
-        st.error("Erro ao remover cliente.")
+        return False
 
 # --- NOVAS FUNÇÕES: GESTÃO DE SERVIÇOS ---
 def listar_servicos(clinic_id: str):
@@ -312,12 +310,11 @@ def adicionar_servico(clinic_id: str, nome: str, duracao_min: int):
         return False
 
 def remover_servico(clinic_id: str, servico_id: str):
-    """Remove um serviço de uma clínica."""
+    """Remove um serviço de uma clínica e retorna True/False."""
     try:
         db.collection('clinicas').document(clinic_id).collection('servicos').document(servico_id).delete()
-        st.success("Serviço removido com sucesso!")
-        st.rerun()
+        return True
     except Exception as e:
         print(f"ERRO AO REMOVER SERVIÇO: {e}")
-        st.error("Erro ao remover serviço.")
+        return False
 
