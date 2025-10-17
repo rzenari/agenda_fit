@@ -30,7 +30,7 @@ from database import (
 )
 from logica_negocio import (
     gerar_token_unico,
-    horario_esta_disponivel,
+    verificar_disponibilidade_com_duracao,
     processar_cancelamento_seguro,
     acao_admin_agendamento,
     buscar_agendamentos_por_data,
@@ -67,7 +67,6 @@ if 'editando_horario_id' not in st.session_state: st.session_state.editando_hora
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "🗓️ Agenda e Agendamento"
 # Estado para o novo fluxo de agendamento
 if 'agenda_cliente_select' not in st.session_state: st.session_state.agenda_cliente_select = "Novo Cliente"
-# CORREÇÃO: Usar a chave do próprio widget de input para controlar seu valor
 if 'c_tel_input' not in st.session_state: st.session_state.c_tel_input = ""
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -107,7 +106,6 @@ def handle_add_profissional():
 def handle_selecao_cliente():
     """Callback para atualizar o telefone quando um cliente é selecionado."""
     cliente_selecionado = st.session_state.agenda_cliente_select
-    # A chave do widget de telefone é 'c_tel_input'. Vamos atualizá-la diretamente.
     if cliente_selecionado != "Novo Cliente":
         clientes = listar_clientes(st.session_state.clinic_id)
         cliente_data = next((c for c in clientes if c['nome'] == cliente_selecionado), None)
@@ -116,7 +114,6 @@ def handle_selecao_cliente():
         else:
             st.session_state.c_tel_input = ''
     else:
-        # Limpa o campo de telefone para o novo cliente
         st.session_state.c_tel_input = ''
 
 
@@ -135,7 +132,12 @@ def handle_agendamento_submission():
         telefone = st.session_state.c_tel_input
 
     hora_consulta = st.session_state.c_hora_input
-    servico = st.session_state.c_servico_input
+    servico_nome = st.session_state.c_servico_input
+    
+    servicos_clinica = listar_servicos(clinic_id)
+    servico_data = next((s for s in servicos_clinica if s['nome'] == servico_nome), None)
+    duracao_servico = servico_data['duracao_min'] if servico_data else 30
+
 
     if not isinstance(hora_consulta, time):
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Nenhum horário válido selecionado."}
@@ -148,7 +150,7 @@ def handle_agendamento_submission():
     dt_consulta_naive = datetime.combine(data_consulta, hora_consulta)
     dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
     
-    disponivel, msg_disponibilidade = horario_esta_disponivel(clinic_id, profissional, dt_consulta_local)
+    disponivel, msg_disponibilidade = verificar_disponibilidade_com_duracao(clinic_id, profissional, dt_consulta_local, duracao_servico)
 
     if disponivel:
         pin_code = gerar_token_unico()
@@ -157,7 +159,8 @@ def handle_agendamento_submission():
             'cliente': cliente,
             'telefone': telefone,
             'horario': dt_consulta_local,
-            'servico_nome': servico,
+            'servico_nome': servico_nome,
+            'duracao_min': duracao_servico
         }
         resultado = salvar_agendamento(clinic_id, dados, pin_code)
 
@@ -168,7 +171,6 @@ def handle_agendamento_submission():
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
             st.session_state.data_filtro_agenda = data_consulta
-            # Limpa o estado após o agendamento
             st.session_state.agenda_cliente_select = "Novo Cliente"
             st.session_state.c_tel_input = ""
 
@@ -345,10 +347,14 @@ def render_agendamento_seguro():
         st.subheader("Selecione o novo horário")
         nova_data = st.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
         
+        duracao_agendamento = agendamento.get('duracao_min', 30)
+        st.info(f"Selecione um novo horário para o serviço de {duracao_agendamento} minutos.")
+
         horarios_disponiveis = gerar_horarios_disponiveis(
             agendamento['clinic_id'],
             agendamento['profissional_nome'],
             nova_data,
+            duracao_agendamento,
             agendamento_id_excluir=agendamento['id']
         )
 
@@ -388,7 +394,6 @@ def render_backoffice_clinica():
     nomes_profissionais = [p['nome'] for p in profissionais_clinica]
     clientes_clinica = listar_clientes(clinic_id)
     servicos_clinica = listar_servicos(clinic_id)
-    nomes_servicos = [s['nome'] for s in servicos_clinica]
 
     tab_options = ["🗓️ Agenda e Agendamento", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
     
@@ -402,7 +407,7 @@ def render_backoffice_clinica():
 
     if active_tab == "🗓️ Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
-        if not nomes_profissionais or not nomes_servicos:
+        if not profissionais_clinica or not servicos_clinica:
             st.warning("É necessário ter ao menos um profissional e um serviço cadastrado para realizar agendamentos.")
         else:
             if st.session_state.get('last_agendamento_info'):
@@ -414,7 +419,7 @@ def render_backoffice_clinica():
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
 
-            # --- NOVO FLUXO DE AGENDAMENTO ---
+            # --- FLUXO DE AGENDAMENTO COM DURAÇÃO DE SERVIÇO ---
             st.subheader("1. Selecione o Cliente")
             opcoes_clientes = ["Novo Cliente"] + [c['nome'] for c in clientes_clinica]
             st.selectbox(
@@ -427,28 +432,31 @@ def render_backoffice_clinica():
             st.subheader("2. Preencha os Detalhes do Agendamento")
             with st.form("admin_form"):
                 
-                # Exibição dos dados do cliente
                 if st.session_state.agenda_cliente_select == "Novo Cliente":
                     col_nome, col_tel = st.columns(2)
                     col_nome.text_input("Nome do Novo Cliente", key="c_nome_novo_cliente_input")
                     col_tel.text_input("Telefone", key="c_tel_input")
                 else:
                     st.markdown(f"**Agendando para:** {st.session_state.agenda_cliente_select}")
-                    # O valor é controlado pelo callback handle_selecao_cliente, que atualiza o estado do widget diretamente.
-                    st.text_input(
-                        "Telefone (edite se necessário)", 
-                        key="c_tel_input"
-                    )
+                    st.text_input("Telefone (edite se necessário)", key="c_tel_input")
                 
                 st.divider()
 
-                # Restante dos campos do agendamento
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
                 form_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
-                form_cols[2].selectbox("Serviço:", nomes_servicos, key="c_servico_input")
+                form_cols[2].selectbox("Serviço:", [s['nome'] for s in servicos_clinica], key="c_servico_input")
 
-                horarios_disponiveis = gerar_horarios_disponiveis(clinic_id, st.session_state.c_prof_input, st.session_state.c_data_input)
+                servico_selecionado_nome = st.session_state.c_servico_input
+                servico_data = next((s for s in servicos_clinica if s['nome'] == servico_selecionado_nome), None)
+                duracao_servico = servico_data['duracao_min'] if servico_data else 30
+
+                horarios_disponiveis = gerar_horarios_disponiveis(
+                    clinic_id, 
+                    st.session_state.c_prof_input, 
+                    st.session_state.c_data_input,
+                    duracao_servico
+                )
                 
                 if horarios_disponiveis:
                     form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
@@ -645,7 +653,7 @@ def render_backoffice_clinica():
             s1.text_input("Nome do Serviço", key="nome_novo_servico", placeholder="Ex: Sessão de Fisioterapia")
             s2.number_input("Duração Padrão (minutos)", min_value=15, step=15, key="duracao_novo_servico", value=30)
             st.form_submit_button("Adicionar Serviço", on_click=handle_add_servico)
-            st.caption("Nota: A lógica de duração variável ainda não impacta a grade de horários, que opera em blocos de 30 min.")
+            st.caption("A duração definida aqui impactará diretamente os horários disponíveis na agenda.")
 
         st.markdown("---")
         st.subheader("Serviços Cadastrados")
