@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM REMARCAÇÃO INTELIGENTE E SEM WARNINGS)
+# app.py (VERSÃO MULTI-CLINICA COM DETALHES DO AGENDAMENTO)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -117,7 +117,8 @@ def handle_agendamento_submission():
 
         if resultado is True:
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
-            st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'status': True}
+            # Adiciona o pin_code para ser exibido na mensagem de sucesso
+            st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
             st.session_state.data_filtro_agenda = data_consulta
         else:
             st.session_state.last_agendamento_info = {'cliente': cliente, 'status': str(resultado)}
@@ -307,7 +308,8 @@ def render_backoffice_clinica():
                 info = st.session_state.last_agendamento_info
                 if info.get('status') is True:
                     st.success(f"Agendado para {info.get('cliente')} com sucesso!")
-                    st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}`")
+                    # Mensagem de sucesso agora exibe o PIN e o link
+                    st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}` (PIN: **{info.get('pin_code')}**)")
                 else:
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
@@ -332,23 +334,43 @@ def render_backoffice_clinica():
         data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
         agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
         if not agenda_do_dia.empty:
+            # --- CABEÇALHO DA AGENDA ---
             header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
-            header_cols[1].markdown("**Cliente**")
+            header_cols[1].markdown("**Cliente / Contato**")
             header_cols[2].markdown("**Profissional / Horário**")
             header_cols[3].markdown("**Ações**")
             st.divider()
+
             for index, row in agenda_do_dia.iterrows():
                 ag_id = row['id']
                 data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
+                
                 selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
-                data_cols[1].write(f"**{row['cliente']}**")
+                
+                # Exibe o nome e o telefone
+                data_cols[1].write(f"**{row['cliente']}**<br><small>{row.get('telefone', 'N/A')}</small>", unsafe_allow_html=True)
                 data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
+                
                 with data_cols[3]:
-                    action_cols = st.columns(3)
-                    action_cols[0].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                    action_cols[1].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                    action_cols[2].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                    # Adiciona uma coluna para o botão de detalhes (popover)
+                    action_cols = st.columns(4)
+                    
+                    # Popover de Detalhes
+                    detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
+                    with detalhes_popover:
+                        pin = row.get('pin_code', 'N/A')
+                        link = f"https://agendafit.streamlit.app?pin={pin}"
+                        st.markdown(f"**Cliente:** {row['cliente']}")
+                        st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
+                        st.markdown(f"**PIN:** `{pin}`")
+                        st.markdown(f"**Link de Gestão:** `{link}`")
+
+                    # Botões de Ação
+                    action_cols[1].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                    action_cols[2].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                    action_cols[3].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
