@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM CORREÇÃO DE LIMPEZA DE FORMULÁRIO)
+# app.py (VERSÃO MULTI-CLINICA COM LAYOUT DA AGENDA MELHORADO)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -309,16 +309,34 @@ def render_backoffice_clinica():
         data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
         agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
         if not agenda_do_dia.empty:
+            # --- CABEÇALHO DA AGENDA ---
+            header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
+            header_cols[1].markdown("**Cliente**")
+            header_cols[2].markdown("**Profissional / Horário**")
+            header_cols[3].markdown("**Ações**")
+            st.divider()
+
             for index, row in agenda_do_dia.iterrows():
                 ag_id = row['id']
-                cols = st.columns([0.1, 0.4, 0.3, 0.1, 0.1, 0.1])
-                selecionado = cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
+                data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
+                
+                # Coluna do checkbox
+                selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
-                cols[1].write(f"**{row['cliente']}**")
-                cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
-                cols[3].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                cols[4].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                cols[5].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                
+                # Coluna de informações do cliente
+                data_cols[1].write(f"**{row['cliente']}**")
+
+                # Coluna de informações do agendamento
+                data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
+                
+                # Coluna de Ações com sub-colunas para os botões
+                with data_cols[3]:
+                    action_cols = st.columns(3)
+                    action_cols[0].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                    action_cols[1].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                    action_cols[2].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
