@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIÇOS)
+# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIços)
 
 import streamlit as st
 import pandas as pd
@@ -130,8 +130,12 @@ def buscar_agendamentos_intervalo(clinic_id: str, start_date: date, end_date: da
         start_dt_naive = datetime.combine(start_date, time.min)
         end_dt_naive = datetime.combine(end_date, time.max)
         
-        start_dt_utc = TZ_SAO_PAULO.localize(start_dt_naive).astimezone(ZoneInfo('UTC'))
-        end_dt_utc = TZ_SAO_PAULO.localize(end_dt_naive).astimezone(ZoneInfo('UTC'))
+        # CORREÇÃO: Usando .replace(tzinfo=...) em vez de .localize(...)
+        start_dt_aware = start_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
+        end_dt_aware = end_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
+
+        start_dt_utc = start_dt_aware.astimezone(ZoneInfo('UTC'))
+        end_dt_utc = end_dt_aware.astimezone(ZoneInfo('UTC'))
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
                                              .where(filter=FieldFilter('horario', '>=', start_dt_utc))\
@@ -155,8 +159,12 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         start_dt_naive = datetime.combine(data_selecionada, time.min)
         end_dt_naive = datetime.combine(data_selecionada, time.max)
         
-        start_dt_utc = TZ_SAO_PAULO.localize(start_dt_naive).astimezone(ZoneInfo('UTC'))
-        end_dt_utc = TZ_SAO_PAULO.localize(end_dt_naive).astimezone(ZoneInfo('UTC'))
+        # CORREÇÃO: Usando .replace(tzinfo=...) em vez de .localize(...)
+        start_dt_aware = start_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
+        end_dt_aware = end_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
+
+        start_dt_utc = start_dt_aware.astimezone(ZoneInfo('UTC'))
+        end_dt_utc = end_dt_aware.astimezone(ZoneInfo('UTC'))
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
             .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))\
@@ -306,3 +314,4 @@ def remover_servico(clinic_id: str, servico_id: str):
     except Exception as e:
         print(f"ERRO AO REMOVER SERVIÇO: {e}")
         st.error("Erro ao remover serviço.")
+
