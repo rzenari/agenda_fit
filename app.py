@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM LAYOUT DA AGENDA MELHORADO)
+# app.py (VERSÃO MULTI-CLINICA COM HORÁRIOS DINÂMICOS)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -27,7 +27,8 @@ from logica_negocio import (
     acao_admin_agendamento,
     buscar_agendamentos_por_data,
     processar_remarcacao,
-    importar_feriados_nacionais
+    importar_feriados_nacionais,
+    gerar_horarios_disponiveis
 )
 
 # --- Configuração ---
@@ -86,12 +87,18 @@ def handle_add_profissional():
         st.warning("O nome do profissional não pode estar em branco.")
 
 def handle_agendamento_submission():
-    """Lida com a criação de um novo agendamento, mas NÃO limpa o form."""
+    """Lida com a criação de um novo agendamento, lendo dos seletores e do form."""
     clinic_id = st.session_state.clinic_id
-    cliente = st.session_state.c_nome_input
+    # Dados dos seletores externos
     profissional = st.session_state.c_prof_input
     data_consulta = st.session_state.c_data_input
+    # Dados do formulário
+    cliente = st.session_state.c_nome_input
     hora_consulta = st.session_state.c_hora_input
+    
+    if not isinstance(hora_consulta, time):
+        st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Nenhum horário válido selecionado."}
+        return
 
     if not cliente or not profissional:
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': "Cliente e Profissional são obrigatórios."}
@@ -275,34 +282,42 @@ def render_backoffice_clinica():
         if not nomes_profissionais:
             st.warning("Nenhum profissional cadastrado. Adicione profissionais na aba 'Gerenciar Profissionais' para poder agendar.")
         else:
-            # LÓGICA CORRIGIDA: Exibe a mensagem e limpa o form ANTES de renderizar o form
+            # --- SELETORES FORA DO FORMULÁRIO PARA FILTRAGEM DINÂMICA ---
+            selector_cols = st.columns(2)
+            selector_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
+            selector_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
+
+            horarios_disponiveis = gerar_horarios_disponiveis(
+                clinic_id,
+                st.session_state.c_prof_input,
+                st.session_state.c_data_input
+            )
+
             if st.session_state.get('last_agendamento_info'):
                 info = st.session_state.last_agendamento_info
                 if info.get('status') is True:
                     st.success(f"Agendado para {info.get('cliente')} com sucesso!")
                     st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao')}`")
-                    # Limpa os campos do form após o sucesso
-                    st.session_state.c_nome_input = ""
-                    st.session_state.c_tel_input = ""
                 else:
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
-                # Reseta a informação para não aparecer novamente
                 st.session_state.last_agendamento_info = None
 
             with st.form("admin_form"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.text_input("Nome do Cliente:", key="c_nome_input")
-                    st.text_input("Telefone:", key="c_tel_input")
-                with col2:
-                    st.selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
-                    st.date_input("Data:", key="c_data_input", min_value=date.today())
-                with col3:
-                    st.time_input("Hora:", key="c_hora_input", step=timedelta(minutes=30))
-                submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary")
+                form_cols = st.columns(2)
+                form_cols[0].text_input("Nome do Cliente:", key="c_nome_input")
+                form_cols[0].text_input("Telefone:", key="c_tel_input")
+                
+                if horarios_disponiveis:
+                    form_cols[1].selectbox("Hora:", options=horarios_disponiveis, key="c_hora_input", format_func=lambda t: t.strftime('%H:%M'))
+                    pode_agendar = True
+                else:
+                    form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
+                    pode_agendar = False
+
+                submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar)
                 if submitted:
                     handle_agendamento_submission()
-                    st.rerun() # Garante que a mensagem de status seja exibida imediatamente
+                    st.rerun()
 
         st.markdown("---")
         st.header("🗓️ Agenda")
@@ -320,17 +335,12 @@ def render_backoffice_clinica():
                 ag_id = row['id']
                 data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
                 
-                # Coluna do checkbox
                 selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
                 
-                # Coluna de informações do cliente
                 data_cols[1].write(f"**{row['cliente']}**")
-
-                # Coluna de informações do agendamento
                 data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
                 
-                # Coluna de Ações com sub-colunas para os botões
                 with data_cols[3]:
                     action_cols = st.columns(3)
                     action_cols[0].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
