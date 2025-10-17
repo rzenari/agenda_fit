@@ -613,36 +613,36 @@ def render_backoffice_clinica():
                 tipo_servico = servico_data.get('tipo', 'Individual')
                 duracao_servico = servico_data['duracao_min']
                 
-                # Lógica para exibir profissional ou turma
+                # CORREÇÃO INICIA AQUI
                 if tipo_servico == 'Em Grupo':
-                    form_cols[0].selectbox("Profissional:", ["-- (Definido pela Turma) --"], key="c_prof_input", disabled=True)
-                    
                     turmas_disponiveis = gerar_turmas_disponiveis(
                         clinic_id, 
                         st.session_state.form_data_selecionada, 
                         turmas_clinica,
                     )
                     
-                    if turmas_disponiveis:
-                        # Formata as opções para exibição
-                        opcoes_turmas = {f"{t['horario_str']} - {t['nome']} ({t['profissional_nome']}) - {t['vagas_ocupadas']}/{t['capacidade_maxima']} vagas": (t['id'], t['horario_obj']) for t in turmas_disponiveis if t['vagas_disponiveis'] > 0}
-                        
-                        if opcoes_turmas:
-                            selecao = form_cols[1].selectbox("Turma:", options=opcoes_turmas.keys(), key="c_hora_input_raw")
-                            st.session_state.c_hora_input = opcoes_turmas[selecao] # Salva (turma_id, time_obj)
-                            # Atualiza o profissional baseado na turma
-                            turma_id_selecionado = opcoes_turmas[selecao][0]
-                            turma_selecionada_obj = next((t for t in turmas_clinica if t['id'] == turma_id_selecionado), None)
-                            if turma_selecionada_obj:
-                                st.session_state.c_prof_input = turma_selecionada_obj.get('profissional_nome', 'N/A')
-                            pode_agendar = True
-                        else:
-                            form_cols[1].selectbox("Turma:", options=["Nenhuma turma com vagas disponíveis"], key="c_hora_input", disabled=True)
-                            pode_agendar = False
+                    opcoes_turmas = {f"{t['horario_str']} - {t['nome']} ({t['profissional_nome']}) - {t['vagas_ocupadas']}/{t['capacidade_maxima']} vagas": (t['id'], t['horario_obj']) for t in turmas_disponiveis if t['vagas_disponiveis'] > 0}
+                    
+                    profissional_nome_turma = "-- (Selecione uma turma) --"
+                    pode_agendar = False
 
+                    if opcoes_turmas:
+                        selecao = form_cols[1].selectbox("Turma:", options=opcoes_turmas.keys(), key="c_hora_input_raw")
+                        st.session_state.c_hora_input = opcoes_turmas[selecao]
+                        turma_id_selecionado = opcoes_turmas[selecao][0]
+                        turma_selecionada_obj = next((t for t in turmas_clinica if t['id'] == turma_id_selecionado), None)
+                        if turma_selecionada_obj:
+                            profissional_nome_turma = turma_selecionada_obj.get('profissional_nome', 'N/A')
+                        pode_agendar = True
                     else:
-                        form_cols[1].selectbox("Turma:", options=["Nenhuma turma disponível para este dia"], key="c_hora_input", disabled=True)
+                        if turmas_disponiveis:
+                             form_cols[1].selectbox("Turma:", options=["Nenhuma turma com vagas disponíveis"], key="c_hora_input", disabled=True)
+                        else:
+                             form_cols[1].selectbox("Turma:", options=["Nenhuma turma disponível para este dia"], key="c_hora_input", disabled=True)
                         pode_agendar = False
+
+                    form_cols[0].text_input("Profissional:", value=profissional_nome_turma, disabled=True)
+                    st.session_state.c_prof_input = profissional_nome_turma
 
                 else: # Individual
                     form_cols[0].selectbox("Profissional:", [p['nome'] for p in profissionais_clinica], key="c_prof_input")
@@ -658,7 +658,8 @@ def render_backoffice_clinica():
                     else:
                         form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
                         pode_agendar = False
-                
+                # FIM DA CORREÇÃO
+
                 st.button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
 
         st.markdown("---")
@@ -1072,3 +1073,4 @@ elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
+
