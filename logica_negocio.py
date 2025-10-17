@@ -14,6 +14,8 @@ from database import (
 
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 DIAS_SEMANA_MAP = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
+DIAS_SEMANA_PT = {0: "Segunda-feira", 1: "Terça-feira", 2: "Quarta-feira", 3: "Quinta-feira", 4: "Sexta-feira", 5: "Sábado", 6: "Domingo"}
+
 
 def gerar_token_unico():
     """Gera um PIN numérico de 6 dígitos."""
@@ -39,7 +41,8 @@ def horario_esta_disponivel(clinic_id: str, profissional_nome: str, data_hora_lo
     expediente_dia = prof_selecionado['horario_trabalho'].get(dia_semana_key)
 
     if not expediente_dia or not expediente_dia.get('ativo'):
-        return False, f"O profissional não trabalha neste dia da semana ({data_hora_local.strftime('%A')})."
+        dia_pt = DIAS_SEMANA_PT[data_hora_local.weekday()]
+        return False, f"O profissional não trabalha neste dia da semana ({dia_pt})."
     
     hora_inicio = datetime.strptime(expediente_dia['inicio'], "%H:%M").time()
     hora_fim = datetime.strptime(expediente_dia['fim'], "%H:%M").time()
