@@ -155,7 +155,7 @@ def importar_feriados_nacionais(clinic_id: str, ano: int):
 
 def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_selecionada: date, duracao_servico: int, agendamento_id_excluir: str = None):
     """
-    Gera uma lista de horários disponíveis mapeando os blocos livres do dia.
+    Gera uma lista de horários disponíveis verificando cada slot de tempo do dia.
     """
     from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
 
@@ -185,7 +185,7 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
     except (ValueError, KeyError):
         return []
 
-    # 2. Mapear Blocos Ocupados
+    # 2. Mapear todos os blocos ocupados do dia
     agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
     if agendamento_id_excluir and not agendamentos_existentes_df.empty:
         agendamentos_existentes_df = agendamentos_existentes_df[agendamentos_existentes_df['id'] != agendamento_id_excluir]
@@ -198,39 +198,37 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
             duracao = int(ag.get('duracao_min', 30))
             fim = inicio + timedelta(minutes=duracao)
             blocos_ocupados.append((inicio, fim))
-    blocos_ocupados.sort()
 
-    # 3. Identificar Blocos Livres
-    blocos_livres = []
-    ponteiro_tempo = inicio_expediente_dt
-    
-    for inicio_ocupado, fim_ocupado in blocos_ocupados:
-        if ponteiro_tempo < inicio_ocupado:
-            blocos_livres.append((ponteiro_tempo, inicio_ocupado))
-        ponteiro_tempo = max(ponteiro_tempo, fim_ocupado) # Usar max para lidar com sobreposições
-    
-    if ponteiro_tempo < fim_expediente_dt:
-        blocos_livres.append((ponteiro_tempo, fim_expediente_dt))
-
-    # 4. Gerar Horários Válidos a Partir dos Blocos Livres
+    # 3. Gerar horários verificando cada slot possível (lógica robusta)
     horarios_disponiveis = []
-    intervalo_minimo = 15 # Define a granularidade da busca (ex: 9:00, 9:15, 9:30...)
+    intervalo_minimo = 15  # Define a granularidade da busca (ex: 9:00, 9:15, 9:30...)
+    slot_candidato = inicio_expediente_dt
 
-    for inicio_livre, fim_livre in blocos_livres:
-        slot_atual = inicio_livre
-        while slot_atual + timedelta(minutes=duracao_servico) <= fim_livre:
-            horarios_disponiveis.append(slot_atual.time())
-            slot_atual += timedelta(minutes=intervalo_minimo)
-            
-    # CORREÇÃO: Se a data for hoje, remover horários que já passaram
+    while slot_candidato + timedelta(minutes=duracao_servico) <= fim_expediente_dt:
+        fim_slot_candidato = slot_candidato + timedelta(minutes=duracao_servico)
+        conflito = False
+
+        # Para cada slot candidato, verifica se ele se sobrepõe a algum agendamento
+        for inicio_ocupado, fim_ocupado in blocos_ocupados:
+            # Lógica de sobreposição: (InícioA < FimB) E (FimA > InícioB)
+            if slot_candidato < fim_ocupado and fim_slot_candidato > inicio_ocupado:
+                conflito = True
+                break  # Se encontrou conflito, para de verificar este slot
+
+        if not conflito:
+            horarios_disponiveis.append(slot_candidato.time())
+
+        slot_candidato += timedelta(minutes=intervalo_minimo)
+
     horarios_unicos = sorted(list(set(horarios_disponiveis)))
 
+    # 4. Se a data for hoje, remover horários que já passaram
     if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
         hora_atual = datetime.now(TZ_SAO_PAULO).time()
         horarios_futuros = [h for h in horarios_unicos if h >= hora_atual]
         return horarios_futuros
-    else:
-        return horarios_unicos
+    
+    return horarios_unicos
 
 
 # --- Funções para Visões de Agenda ---
@@ -291,3 +289,4 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
+
