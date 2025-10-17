@@ -109,12 +109,15 @@ def handle_agendamento_submission():
     data_consulta = st.session_state.c_data_input
     cliente_selecionado = st.session_state.c_nome_input
     
+    # CORREÇÃO: Lógica para obter nome e telefone corretamente
     if cliente_selecionado == "Novo Cliente":
         cliente = st.session_state.c_nome_novo_cliente_input
+        telefone = st.session_state.c_tel_input
     else:
         cliente = cliente_selecionado
+        # Para clientes existentes, o telefone vem do estado da sessão, não do input desabilitado.
+        telefone = st.session_state.cliente_selecionado_telefone
 
-    telefone = st.session_state.c_tel_input
     hora_consulta = st.session_state.c_hora_input
     servico = st.session_state.c_servico_input
 
