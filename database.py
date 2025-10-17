@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIços)
+# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIÇOS E CORREÇÃO DE ÍNDICE)
 
 import streamlit as st
 import pandas as pd
@@ -125,21 +125,10 @@ def buscar_agendamento_por_pin(pin_code: str):
         return None
 
 def buscar_agendamentos_intervalo(clinic_id: str, start_date: date, end_date: date):
-    """Busca todos os agendamentos de uma clínica dentro de um intervalo de datas."""
+    """CORRIGIDO: Busca agendamentos de uma clínica e depois filtra por data em memória para evitar erro de índice."""
     try:
-        start_dt_naive = datetime.combine(start_date, time.min)
-        end_dt_naive = datetime.combine(end_date, time.max)
-        
-        # CORREÇÃO: Usando .replace(tzinfo=...) em vez de .localize(...)
-        start_dt_aware = start_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
-        end_dt_aware = end_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
-
-        start_dt_utc = start_dt_aware.astimezone(ZoneInfo('UTC'))
-        end_dt_utc = end_dt_aware.astimezone(ZoneInfo('UTC'))
-
-        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
-                                             .where(filter=FieldFilter('horario', '>=', start_dt_utc))\
-                                             .where(filter=FieldFilter('horario', '<=', end_dt_utc))
+        # Query mais simples, apenas pelo clinic_id, que não exige índice composto.
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
         docs = query.stream()
         data = []
         for doc in docs:
@@ -148,29 +137,31 @@ def buscar_agendamentos_intervalo(clinic_id: str, start_date: date, end_date: da
             if 'horario' in item and isinstance(item['horario'], datetime):
                 item['horario'] = item['horario'].astimezone(TZ_SAO_PAULO)
             data.append(item)
-        return pd.DataFrame(data)
+        
+        if not data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data)
+
+        # Assegura que a coluna 'horario' é do tipo datetime para a filtragem
+        df['horario'] = pd.to_datetime(df['horario'])
+
+        # Filtro de data feito em memória com Pandas
+        df_filtrado = df[
+            (df['horario'].dt.date >= start_date) & 
+            (df['horario'].dt.date <= end_date)
+        ]
+        
+        return df_filtrado
     except Exception as e:
         print(f"ERRO NA BUSCA DE AGENDAMENTOS POR INTERVALO: {e}")
         return pd.DataFrame()
 
 def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nome: str, data_selecionada: date):
-    """Busca agendamentos para um profissional específico em uma data específica."""
+    """CORRIGIDO: Busca agendamentos de uma clínica e filtra por data e profissional em memória."""
     try:
-        start_dt_naive = datetime.combine(data_selecionada, time.min)
-        end_dt_naive = datetime.combine(data_selecionada, time.max)
-        
-        # CORREÇÃO: Usando .replace(tzinfo=...) em vez de .localize(...)
-        start_dt_aware = start_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
-        end_dt_aware = end_dt_naive.replace(tzinfo=TZ_SAO_PAULO)
-
-        start_dt_utc = start_dt_aware.astimezone(ZoneInfo('UTC'))
-        end_dt_utc = end_dt_aware.astimezone(ZoneInfo('UTC'))
-
-        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
-            .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))\
-            .where(filter=FieldFilter('horario', '>=', start_dt_utc))\
-            .where(filter=FieldFilter('horario', '<=', end_dt_utc))
-        
+        # Query mais simples, apenas pelo clinic_id
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
         docs = query.stream()
         data = []
         for doc in docs:
@@ -179,7 +170,22 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
             if 'horario' in item and isinstance(item['horario'], datetime):
                 item['horario'] = item['horario'].astimezone(TZ_SAO_PAULO)
             data.append(item)
-        return pd.DataFrame(data)
+        
+        if not data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(data)
+
+        # Assegura que a coluna 'horario' é do tipo datetime
+        df['horario'] = pd.to_datetime(df['horario'])
+
+        # Filtro de data e profissional feito em memória com Pandas
+        df_filtrado = df[
+            (df['horario'].dt.date == data_selecionada) & 
+            (df['profissional_nome'] == profissional_nome)
+        ]
+        
+        return df_filtrado
     except Exception as e:
         print(f"ERRO NA BUSCA POR DATA E PROFISSIONAL: {e}")
         return pd.DataFrame()
