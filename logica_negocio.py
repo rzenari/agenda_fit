@@ -207,7 +207,7 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
     for inicio_ocupado, fim_ocupado in blocos_ocupados:
         if ponteiro_tempo < inicio_ocupado:
             blocos_livres.append((ponteiro_tempo, inicio_ocupado))
-        ponteiro_tempo = fim_ocupado
+        ponteiro_tempo = max(ponteiro_tempo, fim_ocupado) # Usar max para lidar com sobreposições
     
     if ponteiro_tempo < fim_expediente_dt:
         blocos_livres.append((ponteiro_tempo, fim_expediente_dt))
@@ -222,7 +222,15 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
             horarios_disponiveis.append(slot_atual.time())
             slot_atual += timedelta(minutes=intervalo_minimo)
             
-    return sorted(list(set(horarios_disponiveis))) # Remove duplicados e ordena
+    # CORREÇÃO: Se a data for hoje, remover horários que já passaram
+    horarios_unicos = sorted(list(set(horarios_disponiveis)))
+
+    if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
+        hora_atual = datetime.now(TZ_SAO_PAULO).time()
+        horarios_futuros = [h for h in horarios_unicos if h >= hora_atual]
+        return horarios_futuros
+    else:
+        return horarios_unicos
 
 
 # --- Funções para Visões de Agenda ---
@@ -283,4 +291,3 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
-
