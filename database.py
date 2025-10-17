@@ -1,8 +1,8 @@
-# database.py (VERSÃO MULTI-CLINICA)
+# database.py (VERSÃO MULTI-CLINICA COM GESTÃO DE HORÁRIOS E FERIADOS)
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import json
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -23,7 +23,6 @@ def get_firestore_client():
 db = get_firestore_client()
 
 # --- FUNÇÕES DE AUTENTICAÇÃO E GERENCIAMENTO DE CLÍNICAS ---
-
 def buscar_clinica_por_login(username, password):
     """Busca uma clínica pelo username e password."""
     try:
@@ -40,12 +39,19 @@ def buscar_clinica_por_login(username, password):
         return None
 
 # --- FUNÇÕES DE GERENCIAMENTO DE PROFISSIONAIS (POR CLÍNICA) ---
-
 def adicionar_profissional(clinic_id, nome_profissional):
-    """Adiciona um novo profissional a uma clínica específica."""
+    """Adiciona um novo profissional com um horário de trabalho padrão."""
     try:
+        horario_padrao = {
+            dia: {"ativo": (dia not in ["sab", "dom"]), "inicio": "09:00", "fim": "18:00"}
+            for dia in ["seg", "ter", "qua", "qui", "sex", "sab", "dom"]
+        }
         profissionais_ref = db.collection('profissionais')
-        profissionais_ref.add({'clinic_id': clinic_id, 'nome': nome_profissional})
+        profissionais_ref.add({
+            'clinic_id': clinic_id, 
+            'nome': nome_profissional,
+            'horario_trabalho': horario_padrao
+        })
         return True
     except Exception as e:
         print(f"Erro ao adicionar profissional: {e}")
@@ -81,20 +87,76 @@ def remover_profissional(clinic_id, profissional_id):
         print(f"Erro ao remover profissional: {e}")
         return False
 
+def atualizar_horario_profissional(clinic_id, profissional_id, horarios):
+    """Atualiza a configuração de horário de um profissional."""
+    try:
+        prof_ref = db.collection('profissionais').document(profissional_id)
+        # Garante que a operação só ocorra se o profissional for da clínica correta
+        prof_doc = prof_ref.get()
+        if prof_doc.exists and prof_doc.to_dict().get('clinic_id') == clinic_id:
+            prof_ref.update({'horario_trabalho': horarios})
+            return True
+        return False
+    except Exception as e:
+        print(f"Erro ao atualizar horário: {e}")
+        return False
 
-# --- FUNÇÕES DE AGENDAMENTO (Adaptadas para Multi-Clínica) ---
+# --- FUNÇÕES DE GESTÃO DE FERIADOS ---
+def adicionar_feriado(clinic_id, data_feriado, descricao):
+    """Adiciona uma data de feriado/folga para uma clínica."""
+    try:
+        # Converte a data para timestamp para salvar no Firestore
+        data_ts = datetime.combine(data_feriado, datetime.min.time())
+        db.collection('feriados').add({
+            'clinic_id': clinic_id,
+            'data': data_ts,
+            'descricao': descricao
+        })
+        return True
+    except Exception as e:
+        print(f"Erro ao adicionar feriado: {e}")
+        return False
 
+def listar_feriados(clinic_id):
+    """Lista todos os feriados de uma clínica, ordenados por data."""
+    try:
+        query = db.collection('feriados').where('clinic_id', '==', clinic_id).order_by('data')
+        docs = query.stream()
+        feriados = []
+        for doc in docs:
+            feriado_data = doc.to_dict()
+            feriado_data['id'] = doc.id
+            # Converte o timestamp de volta para um objeto date para exibição
+            if 'data' in feriado_data and isinstance(feriado_data['data'], datetime):
+                feriado_data['data'] = feriado_data['data'].date()
+            feriados.append(feriado_data)
+        return feriados
+    except Exception as e:
+        print(f"Erro ao listar feriados: {e}")
+        return []
+
+def remover_feriado(clinic_id, feriado_id):
+    """Remove um feriado."""
+    try:
+        feriado_ref = db.collection('feriados').document(feriado_id)
+        feriado_doc = feriado_ref.get()
+        if feriado_doc.exists and feriado_doc.to_dict().get('clinic_id') == clinic_id:
+            feriado_ref.delete()
+            st.rerun()
+            return True
+        return False
+    except Exception as e:
+        print(f"Erro ao remover feriado: {e}")
+        return False
+
+
+# --- FUNÇÕES DE AGENDAMENTO (permanecem as mesmas) ---
 def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
-    """Salva um novo agendamento, associando-o a uma clínica."""
     horario_utc = dados['horario'].astimezone(timezone.utc)
     data_para_salvar = {
-        'clinic_id': clinic_id,
-        'pin_code': str(pin_code),
-        'profissional_nome': dados['profissional_nome'],
-        'cliente': dados['cliente'],
-        'telefone': dados['telefone'],
-        'horario': horario_utc,
-        'status': "Confirmado",
+        'clinic_id': clinic_id, 'pin_code': str(pin_code),
+        'profissional_nome': dados['profissional_nome'], 'cliente': dados['cliente'],
+        'telefone': dados['telefone'], 'horario': horario_utc, 'status': "Confirmado",
     }
     try:
         db.collection("agendamentos").add(data_para_salvar)
@@ -103,7 +165,6 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
         return f"Erro de DB: {e}"
 
 def processar_retorno_firestore(doc):
-    """Converte um documento do Firestore, ajustando o fuso horário."""
     data = doc.to_dict()
     data['id'] = doc.id
     if 'horario' in data and isinstance(data['horario'], datetime):
@@ -112,50 +173,30 @@ def processar_retorno_firestore(doc):
     return data
 
 def buscar_agendamento_por_pin(pin_code: str):
-    """Busca um agendamento pelo PIN (funciona para todas as clínicas)."""
     try:
         query = db.collection("agendamentos").where(filter=FieldFilter('pin_code', '==', str(pin_code))).limit(1)
         docs = query.get()
         return processar_retorno_firestore(docs[0]) if docs else None
-    except Exception as e:
-        return None
-
-def buscar_agendamentos_por_intervalo(clinic_id: str, start_dt_utc: datetime, end_dt_utc: datetime):
-    """Busca agendamentos de uma clínica em um intervalo."""
-    try:
-        query = db.collection("agendamentos") \
-            .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-            .where(filter=FieldFilter('horario', '>=', start_dt_utc)) \
-            .where(filter=FieldFilter('horario', '<', end_dt_utc)) \
-            .order_by('horario')
-        docs = query.stream()
-        return [processar_retorno_firestore(doc) for doc in docs]
-    except Exception as e:
-        print(f"ERRO NA BUSCA POR INTERVALO: {e}")
-        return []
+    except: return None
 
 def buscar_todos_agendamentos(clinic_id: str):
-    """Busca todos os agendamentos de uma clínica."""
     try:
         query = db.collection("agendamentos").where(filter=FieldFilter('clinic_id', '==', clinic_id))
         docs = query.stream()
         data = [processar_retorno_firestore(doc) for doc in docs]
         return pd.DataFrame(data) if data else pd.DataFrame()
-    except Exception as e:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
     try:
         db.collection("agendamentos").document(id_agendamento).update({'status': novo_status})
         return True
-    except Exception:
-        return False
+    except: return False
 
 def atualizar_horario_agendamento(id_agendamento: str, novo_horario_local: datetime):
     try:
         novo_horario_utc = novo_horario_local.astimezone(timezone.utc)
         db.collection("agendamentos").document(id_agendamento).update({'horario': novo_horario_utc})
         return True
-    except Exception:
-        return False
+    except: return False
 
