@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM DETALHES DO AGENDAMENTO)
+# app.py (VERSÃO MULTI-CLINICA COM MENSAGEM WHATSAPP)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -355,8 +355,7 @@ def render_backoffice_clinica():
                 data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
                 
                 with data_cols[3]:
-                    # Adiciona uma coluna para o botão de detalhes (popover)
-                    action_cols = st.columns(4)
+                    action_cols = st.columns(5) # Aumentado para 5 colunas para o novo botão
                     
                     # Popover de Detalhes
                     detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
@@ -368,10 +367,26 @@ def render_backoffice_clinica():
                         st.markdown(f"**PIN:** `{pin}`")
                         st.markdown(f"**Link de Gestão:** `{link}`")
 
+                    # Modal de Mensagem WhatsApp
+                    if action_cols[1].button("💬", key=f"wpp_{ag_id}", help="Gerar Mensagem WhatsApp"):
+                        pin = row.get('pin_code', 'N/A')
+                        link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
+                        mensagem = (
+                            f"Olá, {row['cliente']}! Tudo bem?\n\n"
+                            f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row['profissional_nome']} "
+                            f"no dia {row['horario'].strftime('%d/%m/%Y')} às {row['horario'].strftime('%H:%M')}.\n\n"
+                            f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                        )
+                        
+                        # Usando st.modal para o pop-up
+                        with st.modal("Mensagem para WhatsApp", key=f"modal_wpp_{ag_id}"):
+                            st.text_area("Mensagem:", value=mensagem, height=200)
+                            st.write("Copie a mensagem acima e envie para o cliente.")
+
                     # Botões de Ação
-                    action_cols[1].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                    action_cols[2].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                    action_cols[3].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                    action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                    action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                    action_cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
 
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
