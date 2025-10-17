@@ -1,4 +1,4 @@
-# database.py (VERSÃO COM GESTÃO DE CLIENTES E SERVIÇOS E CORREÇÃO DE ÍNDICE)
+# database.py (VERSÃO MULTI-CLINICA)
 
 import streamlit as st
 import pandas as pd
@@ -69,7 +69,7 @@ def adicionar_profissional(clinic_id: str, nome: str):
         return False
 
 def remover_profissional(clinic_id: str, profissional_id: str):
-    """Remove um profissional de uma clínica e retorna True/False."""
+    """Remove um profissional de uma clínica."""
     try:
         db.collection('clinicas').document(clinic_id).collection('profissionais').document(profissional_id).delete()
         return True
@@ -99,8 +99,9 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'cliente': dados['cliente'],
             'telefone': dados['telefone'],
             'horario': dados['horario'],
+            'servico_nome': dados['servico_nome'],
+            'duracao_min': dados['duracao_min'],
             'status': "Confirmado",
-            'servico_nome': dados.get('servico_nome', 'Não especificado'), # Salva o nome do serviço
         }
         agendamentos_ref.add(data_para_salvar)
         return True
@@ -123,44 +124,41 @@ def buscar_agendamento_por_pin(pin_code: str):
         print(f"ERRO NA BUSCA POR PIN: {e}")
         return None
 
-def buscar_agendamentos_intervalo(clinic_id: str, start_date: date, end_date: date):
-    """CORRIGIDO: Busca agendamentos de uma clínica e depois filtra por data em memória para evitar erro de índice."""
+def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date: date):
+    """Busca todos os agendamentos de uma clínica em um intervalo de datas."""
     try:
-        # Query mais simples, apenas pelo clinic_id, que não exige índice composto.
+        start_dt = datetime.combine(start_date, time.min, tzinfo=TZ_SAO_PAULO)
+        end_dt = datetime.combine(end_date, time.max, tzinfo=TZ_SAO_PAULO)
+        
+        # Consulta mais simples para evitar a necessidade de índices compostos complexos
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
         docs = query.stream()
+        
         data = []
         for doc in docs:
             item = doc.to_dict()
             item['id'] = doc.id
             if 'horario' in item and isinstance(item['horario'], datetime):
                 item['horario'] = item['horario'].astimezone(TZ_SAO_PAULO)
-            data.append(item)
+                # Filtra o intervalo de datas em memória
+                if start_dt <= item['horario'] <= end_dt:
+                    data.append(item)
         
-        if not data:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(data)
-
-        # Assegura que a coluna 'horario' é do tipo datetime para a filtragem
-        df['horario'] = pd.to_datetime(df['horario'])
-
-        # Filtro de data feito em memória com Pandas
-        df_filtrado = df[
-            (df['horario'].dt.date >= start_date) & 
-            (df['horario'].dt.date <= end_date)
-        ]
-        
-        return df_filtrado
+        return pd.DataFrame(data)
     except Exception as e:
         print(f"ERRO NA BUSCA DE AGENDAMENTOS POR INTERVALO: {e}")
         return pd.DataFrame()
 
+
 def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nome: str, data_selecionada: date):
-    """CORRIGIDO: Busca agendamentos de uma clínica e filtra por data e profissional em memória."""
+    """Busca agendamentos para um profissional específico em uma data específica."""
     try:
-        # Query mais simples, apenas pelo clinic_id
-        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
+        start_dt = datetime.combine(data_selecionada, time.min, tzinfo=TZ_SAO_PAULO)
+        end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
+
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
+            .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
+        
         docs = query.stream()
         data = []
         for doc in docs:
@@ -168,23 +166,9 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
             item['id'] = doc.id
             if 'horario' in item and isinstance(item['horario'], datetime):
                 item['horario'] = item['horario'].astimezone(TZ_SAO_PAULO)
-            data.append(item)
-        
-        if not data:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(data)
-
-        # Assegura que a coluna 'horario' é do tipo datetime
-        df['horario'] = pd.to_datetime(df['horario'])
-
-        # Filtro de data e profissional feito em memória com Pandas
-        df_filtrado = df[
-            (df['horario'].dt.date == data_selecionada) & 
-            (df['profissional_nome'] == profissional_nome)
-        ]
-        
-        return df_filtrado
+                if start_dt <= item['horario'] <= end_dt:
+                    data.append(item)
+        return pd.DataFrame(data)
     except Exception as e:
         print(f"ERRO NA BUSCA POR DATA E PROFISSIONAL: {e}")
         return pd.DataFrame()
@@ -216,7 +200,7 @@ def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
     try:
         feriados_ref = db.collection('clinicas').document(clinic_id).collection('feriados')
         data_dt = datetime.combine(data_feriado, time.min)
-        feriados_ref.add({'data': data_dt, 'descricao': descricao})
+        feriados_ref.add({'data': data_dt, 'descricao': descricao, 'clinic_id': clinic_id})
         return True
     except Exception as e:
         print(f"ERRO AO ADICIONAR FERIADO: {e}")
@@ -240,7 +224,7 @@ def listar_feriados(clinic_id: str):
         return []
 
 def remover_feriado(clinic_id: str, feriado_id: str):
-    """Remove um feriado de uma clínica e retorna True/False."""
+    """Remove um feriado de uma clínica."""
     try:
         db.collection('clinicas').document(clinic_id).collection('feriados').document(feriado_id).delete()
         return True
@@ -248,7 +232,7 @@ def remover_feriado(clinic_id: str, feriado_id: str):
         print(f"ERRO AO REMOVER FERIADO: {e}")
         return False
 
-# --- NOVAS FUNÇÕES: GESTÃO DE CLIENTES ---
+# --- NOVAS FUNÇÕES - Gestão de Clientes (CRM) ---
 def listar_clientes(clinic_id: str):
     """Lista todos os clientes de uma clínica."""
     try:
@@ -275,7 +259,7 @@ def adicionar_cliente(clinic_id: str, nome: str, telefone: str, observacoes: str
         return False
 
 def remover_cliente(clinic_id: str, cliente_id: str):
-    """Remove um cliente de uma clínica e retorna True/False."""
+    """Remove um cliente de uma clínica."""
     try:
         db.collection('clinicas').document(clinic_id).collection('clientes').document(cliente_id).delete()
         return True
@@ -283,7 +267,7 @@ def remover_cliente(clinic_id: str, cliente_id: str):
         print(f"ERRO AO REMOVER CLIENTE: {e}")
         return False
 
-# --- NOVAS FUNÇÕES: GESTÃO DE SERVIÇOS ---
+# --- NOVAS FUNÇÕES - Gestão de Serviços ---
 def listar_servicos(clinic_id: str):
     """Lista todos os serviços de uma clínica."""
     try:
@@ -310,7 +294,7 @@ def adicionar_servico(clinic_id: str, nome: str, duracao_min: int):
         return False
 
 def remover_servico(clinic_id: str, servico_id: str):
-    """Remove um serviço de uma clínica e retorna True/False."""
+    """Remove um serviço de uma clínica."""
     try:
         db.collection('clinicas').document(clinic_id).collection('servicos').document(servico_id).delete()
         return True
