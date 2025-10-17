@@ -1,4 +1,4 @@
-# app.py (VERSÃO MULTI-CLINICA COM CORREÇÃO NO FORM DE ADICIONAR PROFISSIONAL)
+# app.py (VERSÃO MULTI-CLINICA COM REMARCAÇÃO INTELIGENTE E SEM WARNINGS)
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -62,7 +62,6 @@ def handle_login():
     if clinica:
         st.session_state.clinic_id = clinica['id']
         st.session_state.clinic_name = clinica.get('nome_fantasia', username)
-        st.rerun()
     else:
         st.error("Usuário ou senha inválidos.")
 
@@ -72,7 +71,6 @@ def handle_logout():
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
-    st.rerun()
 
 def handle_add_profissional():
     """Adiciona um novo profissional para a clínica logada."""
@@ -89,10 +87,8 @@ def handle_add_profissional():
 def handle_agendamento_submission():
     """Lida com a criação de um novo agendamento, lendo dos seletores e do form."""
     clinic_id = st.session_state.clinic_id
-    # Dados dos seletores externos
     profissional = st.session_state.c_prof_input
     data_consulta = st.session_state.c_data_input
-    # Dados do formulário
     cliente = st.session_state.c_nome_input
     hora_consulta = st.session_state.c_hora_input
     
@@ -170,13 +166,17 @@ def handle_importar_feriados():
 def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
     nova_data = st.session_state.nova_data_remarcacao
     nova_hora = st.session_state.nova_hora_remarcacao
+    
+    if not isinstance(nova_hora, time):
+        st.session_state.remarcacao_status = {'sucesso': False, 'mensagem': "Nenhum horário válido selecionado."}
+        return
+
     novo_horario_naive = datetime.combine(nova_data, nova_hora)
     novo_horario_local = novo_horario_naive.replace(tzinfo=TZ_SAO_PAULO)
     sucesso, mensagem = processar_remarcacao(pin, agendamento_id, profissional_nome, novo_horario_local)
     st.session_state.remarcacao_status = {'sucesso': sucesso, 'mensagem': mensagem}
     if sucesso:
         st.session_state.remarcando = False
-    st.rerun()
 
 def handle_cancelar_selecionados():
     ids_para_cancelar = [ag_id for ag_id, selecionado in st.session_state.agendamentos_selecionados.items() if selecionado]
@@ -189,12 +189,10 @@ def handle_cancelar_selecionados():
             sucessos += 1
     st.success(f"{sucessos} de {len(ids_para_cancelar)} agendamentos cancelados com sucesso.")
     st.session_state.agendamentos_selecionados.clear()
-    st.rerun()
 
 def handle_admin_action(id_agendamento: str, acao: str):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
-        st.rerun()
     else:
         st.error("Falha ao registrar a ação no sistema.")
 
@@ -209,7 +207,8 @@ def render_login_page():
     with st.form("login_form"):
         st.text_input("Usuário", key="login_username")
         st.text_input("Senha", type="password", key="login_password")
-        st.form_submit_button("Entrar", on_click=handle_login, use_container_width=True)
+        if st.form_submit_button("Entrar", use_container_width=True):
+            handle_login()
 
 def render_agendamento_seguro():
     st.title("🔒 Gestão do seu Agendamento")
@@ -236,15 +235,28 @@ def render_agendamento_seguro():
     st.caption(f"Cliente: {agendamento['cliente']}")
     st.markdown("---")
     if st.session_state.remarcando:
+        st.subheader("Selecione o novo horário")
+        nova_data = st.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
+        
+        horarios_disponiveis = gerar_horarios_disponiveis(
+            agendamento['clinic_id'],
+            agendamento['profissional_nome'],
+            nova_data,
+            agendamento_id_excluir=agendamento['id'] # Exclui o próprio agendamento da checagem
+        )
+
         with st.form("form_remarcacao"):
-            st.subheader("Selecione o novo horário")
-            col1, col2 = st.columns(2)
-            col1.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
-            col2.time_input("Nova hora", key="nova_hora_remarcacao", step=timedelta(minutes=30))
-            st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id'], agendamento['profissional_nome']), use_container_width=True)
+            if horarios_disponiveis:
+                st.selectbox("Nova hora:", options=horarios_disponiveis, key="nova_hora_remarcacao", format_func=lambda t: t.strftime('%H:%M'))
+                pode_remarcar = True
+            else:
+                st.selectbox("Nova hora:", options=["Nenhum horário disponível"], key="nova_hora_remarcacao", disabled=True)
+                pode_remarcar = False
+            
+            st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id'], agendamento['profissional_nome']), use_container_width=True, disabled=not pode_remarcar)
+
         if st.button("⬅️ Voltar", use_container_width=True):
             st.session_state.remarcando = False
-            st.rerun()
     else:
         col1, col2 = st.columns(2)
         if col1.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
@@ -254,13 +266,13 @@ def render_agendamento_seguro():
                 st.error("Erro ao cancelar.")
         if col2.button("🔄 REMARCAR HORÁRIO", use_container_width=True):
             st.session_state.remarcando = True
-            st.rerun()
-
+            
 def render_backoffice_clinica():
     clinic_id = st.session_state.clinic_id
     
     st.sidebar.header(f"Clínica: {st.session_state.clinic_name}")
-    st.sidebar.button("Sair", on_click=handle_logout)
+    if st.sidebar.button("Sair"):
+        handle_logout()
     
     profissionais_clinica = listar_profissionais(clinic_id)
     nomes_profissionais = [p['nome'] for p in profissionais_clinica]
@@ -276,13 +288,11 @@ def render_backoffice_clinica():
         label_visibility="collapsed"
     )
 
-    # O conteúdo é renderizado com base na aba ativa
     if active_tab == "🗓️ Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
         if not nomes_profissionais:
             st.warning("Nenhum profissional cadastrado. Adicione profissionais na aba 'Gerenciar Profissionais' para poder agendar.")
         else:
-            # --- SELETORES FORA DO FORMULÁRIO PARA FILTRAGEM DINÂMICA ---
             selector_cols = st.columns(2)
             selector_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
             selector_cols[1].date_input("Data:", key="c_data_input", min_value=date.today())
@@ -314,39 +324,31 @@ def render_backoffice_clinica():
                     form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
                     pode_agendar = False
 
-                submitted = st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar)
-                if submitted:
+                if st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar):
                     handle_agendamento_submission()
-                    st.rerun()
 
         st.markdown("---")
         st.header("🗓️ Agenda")
         data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
         agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
         if not agenda_do_dia.empty:
-            # --- CABEÇALHO DA AGENDA ---
             header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
             header_cols[1].markdown("**Cliente**")
             header_cols[2].markdown("**Profissional / Horário**")
             header_cols[3].markdown("**Ações**")
             st.divider()
-
             for index, row in agenda_do_dia.iterrows():
                 ag_id = row['id']
                 data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
-                
                 selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                 st.session_state.agendamentos_selecionados[ag_id] = selecionado
-                
                 data_cols[1].write(f"**{row['cliente']}**")
                 data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
-                
                 with data_cols[3]:
                     action_cols = st.columns(3)
                     action_cols[0].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
                     action_cols[1].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
                     action_cols[2].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
-
             if any(st.session_state.agendamentos_selecionados.values()):
                 st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
         else:
@@ -356,8 +358,8 @@ def render_backoffice_clinica():
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
-            # CORREÇÃO: Usar on_click para evitar o StreamlitAPIException
-            st.form_submit_button("Adicionar", on_click=handle_add_profissional)
+            if st.form_submit_button("Adicionar"):
+                handle_add_profissional()
 
         st.markdown("---")
         st.subheader("Profissionais Cadastrados")
@@ -394,13 +396,11 @@ def render_backoffice_clinica():
                             cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
                         
                         submit_cols = st.columns(2)
-                        submitted = submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True)
-                        if submitted:
+                        if submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True):
                             handle_salvar_horarios_profissional(prof_id)
 
                         if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
                             st.session_state.editando_horario_id = None
-                            st.rerun()
                 else:
                     st.write(f"**Horários salvos para: {prof_selecionado_nome}**")
                     for dia_key, dia_nome in DIAS_SEMANA.items():
