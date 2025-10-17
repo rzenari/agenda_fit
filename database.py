@@ -1,4 +1,4 @@
-# database.py (VERSÃO MULTI-CLINICA)
+# database.py (VERSÃO MULTI-CLINICA COM GESTÃO ADMIN)
 
 import streamlit as st
 import pandas as pd
@@ -26,12 +26,59 @@ db = get_firestore_client()
 if db is None:
     st.stop()
 
+# --- Funções de Gestão de Clínicas (Super Admin) ---
+
+def listar_clinicas():
+    """Lista todas as clínicas cadastradas para o painel admin."""
+    try:
+        docs = db.collection('clinicas').order_by('nome_fantasia').stream()
+        clinicas = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            clinicas.append(data)
+        return clinicas
+    except Exception as e:
+        print(f"ERRO AO LISTAR CLÍNICAS: {e}")
+        return []
+
+def adicionar_clinica(nome_fantasia: str, username: str, password: str):
+    """Adiciona uma nova clínica à coleção principal."""
+    try:
+        # Verificar se o username já existe
+        query = db.collection('clinicas').where(filter=FieldFilter('username', '==', username)).limit(1)
+        if any(query.stream()):
+            return False, "Este nome de usuário já está em uso."
+
+        db.collection('clinicas').add({
+            'nome_fantasia': nome_fantasia,
+            'username': username,
+            'password': password,
+            'ativo': True  # Nova clínica começa ativa por padrão
+        })
+        return True, "Clínica adicionada com sucesso."
+    except Exception as e:
+        print(f"ERRO AO ADICIONAR CLÍNICA: {e}")
+        return False, str(e)
+
+def toggle_status_clinica(clinic_id: str, status_atual: bool):
+    """Ativa ou desativa uma clínica (soft delete)."""
+    try:
+        clinic_ref = db.collection('clinicas').document(clinic_id)
+        clinic_ref.update({'ativo': not status_atual})
+        return True
+    except Exception as e:
+        print(f"ERRO AO ALTERAR STATUS DA CLÍNICA: {e}")
+        return False
+
 # --- Funções de Autenticação e Gestão de Clínicas ---
 def buscar_clinica_por_login(username, password):
-    """Busca uma clínica pelo username e password."""
+    """Busca uma clínica ativa pelo username e password."""
     try:
         clinicas_ref = db.collection('clinicas')
-        query = clinicas_ref.where(filter=FieldFilter('username', '==', username)).where(filter=FieldFilter('password', '==', password)).limit(1)
+        query = clinicas_ref.where(filter=FieldFilter('username', '==', username)) \
+                            .where(filter=FieldFilter('password', '==', password)) \
+                            .where(filter=FieldFilter('ativo', '==', True)).limit(1)
         docs = query.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -156,7 +203,7 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         start_dt = datetime.combine(data_selecionada, time.min, tzinfo=TZ_SAO_PAULO)
         end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
 
-        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))\
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
             .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
         
         docs = query.stream()
@@ -301,4 +348,3 @@ def remover_servico(clinic_id: str, servico_id: str):
     except Exception as e:
         print(f"ERRO AO REMOVER SERVIÇO: {e}")
         return False
-
