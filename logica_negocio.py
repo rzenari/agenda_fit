@@ -228,6 +228,7 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         horarios_futuros = [h for h in horarios_unicos if h >= hora_atual]
         return horarios_futuros
     
+    # Se a data não for hoje, retorna todos os horários únicos encontrados.
     return horarios_unicos
 
 
