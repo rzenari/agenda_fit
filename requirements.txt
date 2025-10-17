@@ -3,3 +3,4 @@ pandas
 google-cloud-firestore
 tzdata
 requests
+plotly
