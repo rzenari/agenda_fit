@@ -77,6 +77,7 @@ def handle_login():
     if clinica:
         st.session_state.clinic_id = clinica['id']
         st.session_state.clinic_name = clinica.get('nome_fantasia', username)
+        st.rerun()
     else:
         st.error("Usuário ou senha inválidos.")
 
@@ -121,7 +122,6 @@ def handle_agendamento_submission():
     data_consulta = st.session_state.c_data_input
     cliente_selecionado = st.session_state.c_nome_input
     
-    # Se for um novo cliente, pega o nome do campo de texto, senão, usa o selecionado
     if cliente_selecionado == "Novo Cliente":
         cliente = st.session_state.c_nome_novo_cliente_input
     else:
@@ -140,7 +140,7 @@ def handle_agendamento_submission():
         return
 
     dt_consulta_naive = datetime.combine(data_consulta, hora_consulta)
-    dt_consulta_local = TZ_SAO_PAULO.localize(dt_consulta_naive)
+    dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
     
     disponivel, msg_disponibilidade = horario_esta_disponivel(clinic_id, profissional, dt_consulta_local)
 
@@ -151,14 +151,13 @@ def handle_agendamento_submission():
             'cliente': cliente,
             'telefone': telefone,
             'horario': dt_consulta_local,
-            'servico_nome': servico, # Adiciona o serviço
+            'servico_nome': servico,
         }
         resultado = salvar_agendamento(clinic_id, dados, pin_code)
 
         if resultado is True:
-            # Se for um novo cliente, salva na base de clientes
             if cliente_selecionado == "Novo Cliente":
-                adicionar_cliente(clinic_id, cliente, telefone, "") # Adiciona observações em branco
+                adicionar_cliente(clinic_id, cliente, telefone, "")
 
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': cliente, 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
@@ -168,10 +167,10 @@ def handle_agendamento_submission():
     else:
         st.session_state.last_agendamento_info = {'cliente': cliente, 'status': msg_disponibilidade}
     
-    # Limpa os campos após a tentativa de agendamento
     st.session_state.c_nome_input = "Novo Cliente"
-    st.session_state.c_nome_novo_cliente_input = ""
     st.session_state.cliente_selecionado_telefone = ""
+    if 'c_nome_novo_cliente_input' in st.session_state:
+        st.session_state.c_nome_novo_cliente_input = ""
 
 
 def handle_salvar_horarios_profissional(prof_id):
@@ -194,13 +193,14 @@ def handle_salvar_horarios_profissional(prof_id):
     else:
         st.error("Falha ao atualizar horários.")
 
-# ... (outras funções handle existentes como handle_adicionar_feriado, etc. permanecem iguais) ...
 def handle_adicionar_feriado():
     data = st.session_state.nova_data_feriado
     descricao = st.session_state.descricao_feriado
     if data and descricao:
         if adicionar_feriado(st.session_state.clinic_id, data, descricao):
             st.success(f"Feriado '{descricao}' em {data.strftime('%d/%m/%Y')} adicionado.")
+            st.session_state.nova_data_feriado = datetime.now(TZ_SAO_PAULO).date()
+            st.session_state.descricao_feriado = ""
         else:
             st.error("Erro ao adicionar feriado.")
     else:
@@ -223,7 +223,7 @@ def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
         return
 
     novo_horario_naive = datetime.combine(nova_data, nova_hora)
-    novo_horario_local = TZ_SAO_PAULO.localize(novo_horario_naive)
+    novo_horario_local = novo_horario_naive.replace(tzinfo=TZ_SAO_PAULO)
     sucesso, mensagem = processar_remarcacao(pin, agendamento_id, profissional_nome, novo_horario_local)
     st.session_state.remarcacao_status = {'sucesso': sucesso, 'mensagem': mensagem}
     if sucesso:
@@ -286,11 +286,9 @@ def render_login_page():
     with st.form("login_form"):
         st.text_input("Usuário", key="login_username")
         st.text_input("Senha", type="password", key="login_password")
-        if st.form_submit_button("Entrar", use_container_width=True):
-            handle_login()
+        st.form_submit_button("Entrar", use_container_width=True, on_click=handle_login)
 
 def render_agendamento_seguro():
-    # Esta função permanece a mesma
     st.title("🔒 Gestão do seu Agendamento")
     if st.session_state.remarcacao_status:
         status = st.session_state.remarcacao_status
@@ -337,6 +335,7 @@ def render_agendamento_seguro():
 
         if st.button("⬅️ Voltar", use_container_width=True):
             st.session_state.remarcando = False
+            st.rerun()
     else:
         col1, col2 = st.columns(2)
         if col1.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
@@ -344,6 +343,7 @@ def render_agendamento_seguro():
                 st.success("Agendamento cancelado com sucesso.")
             else:
                 st.error("Erro ao cancelar.")
+            st.rerun()
         if col2.button("🔄 REMARCAR HORÁRIO", use_container_width=True):
             st.session_state.remarcando = True
             st.rerun()
@@ -361,7 +361,6 @@ def render_backoffice_clinica():
     servicos_clinica = listar_servicos(clinic_id)
     nomes_servicos = [s['nome'] for s in servicos_clinica]
 
-    # --- SISTEMA DE NAVEGAÇÃO POR ABAS ---
     tab_options = ["🗓️ Agenda e Agendamento", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
     
     active_tab = st.radio(
@@ -377,7 +376,6 @@ def render_backoffice_clinica():
         if not nomes_profissionais or not nomes_servicos:
             st.warning("É necessário ter ao menos um profissional e um serviço cadastrado para realizar agendamentos.")
         else:
-            # Lógica de mensagem de sucesso/erro
             if st.session_state.get('last_agendamento_info'):
                 info = st.session_state.last_agendamento_info
                 if info.get('status') is True:
@@ -387,7 +385,6 @@ def render_backoffice_clinica():
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status')}")
                 st.session_state.last_agendamento_info = None
 
-            # Formulário de Agendamento
             with st.form("admin_form"):
                 form_cols = st.columns(3)
                 form_cols[0].selectbox("Profissional:", nomes_profissionais, key="c_prof_input")
@@ -412,8 +409,7 @@ def render_backoffice_clinica():
                 else:
                     form_cols[2].text_input("Telefone:", key="c_tel_input", value=st.session_state.cliente_selecionado_telefone, disabled=True)
 
-                if st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, use_container_width=True):
-                    handle_agendamento_submission()
+                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, use_container_width=True, on_click=handle_agendamento_submission)
 
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
@@ -423,7 +419,6 @@ def render_backoffice_clinica():
         with view_tab1:
             data_selecionada = st.date_input("Filtrar por data:", key='data_filtro_agenda', format="DD/MM/YYYY")
             agenda_do_dia = buscar_agendamentos_por_data(clinic_id, data_selecionada)
-            # ... (Lógica da visão de lista existente, com uma pequena modificação para mostrar o serviço) ...
             if not agenda_do_dia.empty:
                 header_cols = st.columns([0.1, 0.4, 0.3, 0.3])
                 header_cols[1].markdown("**Cliente / Serviço**")
@@ -438,7 +433,6 @@ def render_backoffice_clinica():
                     selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
                     st.session_state.agendamentos_selecionados[ag_id] = selecionado
                     
-                    # Exibe o nome do cliente e o serviço
                     data_cols[1].write(f"**{row['cliente']}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
                     data_cols[2].write(f"{row['profissional_nome']} - {row['horario'].strftime('%H:%M')}")
                     
@@ -452,7 +446,6 @@ def render_backoffice_clinica():
                             st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
                             st.markdown(f"**PIN:** `{pin}`")
                             st.markdown(f"**Link:** `{link}`")
-                        # (O resto dos botões de ação permanecem os mesmos)
                         wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
                         with wpp_popover:
                              pin = row.get('pin_code', 'N/A')
@@ -517,7 +510,6 @@ def render_backoffice_clinica():
             if df_dashboard.empty:
                 st.info("Não há dados de agendamento no período selecionado para gerar relatórios.")
             else:
-                # --- GRÁFICOS ---
                 col_graf1, col_graf2 = st.columns(2)
                 
                 with col_graf1:
@@ -544,15 +536,22 @@ def render_backoffice_clinica():
 
                 st.subheader("Mapa de Calor: Horários de Pico")
                 df_confirmados = df_dashboard[df_dashboard['status'].isin(['Finalizado', 'Confirmado'])].copy()
-                df_confirmados['dia_semana'] = df_confirmados['horario'].dt.day_name()
-                df_confirmados['hora'] = df_confirmados['horario'].dt.hour
-                
-                heatmap_data = df_confirmados.groupby(['dia_semana', 'hora']).size().unstack(fill_value=0)
-                # Ordenar os dias da semana
-                dias_ordem = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                heatmap_data = heatmap_data.reindex(dias_ordem).fillna(0).T
+                if not df_confirmados.empty:
+                    df_confirmados['dia_semana_num'] = df_confirmados['horario'].dt.weekday
+                    df_confirmados['dia_semana_nome'] = df_confirmados['horario'].dt.day_name()
+                    df_confirmados['hora'] = df_confirmados['horario'].dt.hour
+                    
+                    heatmap_data = df_confirmados.pivot_table(index='hora', columns='dia_semana_num', values='id', aggfunc='count').fillna(0)
+                    
+                    dias_pt = {0: 'Segunda', 1: 'Terça', 2: 'Quarta', 3: 'Quinta', 4: 'Sexta', 5: 'Sábado', 6: 'Domingo'}
+                    heatmap_data = heatmap_data.rename(columns=dias_pt)
 
-                if not heatmap_data.empty:
+                    ordem_dias = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+                    for dia in ordem_dias:
+                        if dia not in heatmap_data.columns:
+                            heatmap_data[dia] = 0
+                    heatmap_data = heatmap_data[ordem_dias]
+
                     fig_heatmap = go.Figure(data=go.Heatmap(
                         z=heatmap_data.values,
                         x=heatmap_data.columns,
@@ -566,7 +565,7 @@ def render_backoffice_clinica():
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
     
-    elif active_tab == "👤 Gerenciar Clientes":
+    elif active_tab == "👤 Gerenciar Clien tes":
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
             st.subheader("Cadastrar Novo Cliente")
@@ -574,8 +573,7 @@ def render_backoffice_clinica():
             c1.text_input("Nome do Cliente", key="nome_novo_cliente")
             c2.text_input("Telefone", key="tel_novo_cliente")
             st.text_area("Observações", key="obs_novo_cliente")
-            if st.form_submit_button("Adicionar Cliente"):
-                handle_add_cliente()
+            st.form_submit_button("Adicionar Cliente", on_click=handle_add_cliente) # CORREÇÃO
         
         st.markdown("---")
         st.subheader("Clientes Cadastrados")
@@ -583,12 +581,12 @@ def render_backoffice_clinica():
             df_clientes = pd.DataFrame(clientes_clinica)
             st.dataframe(df_clientes[['nome', 'telefone', 'observacoes']], use_container_width=True)
             
-            cliente_para_remover = st.selectbox("Selecione um cliente para remover", options=[""] + [c['nome'] for c in clientes_clinica])
-            if cliente_para_remover:
-                if st.button(f"Remover {cliente_para_remover}", type="primary"):
-                    cliente_id = next((c['id'] for c in clientes_clinica if c['nome'] == cliente_para_remover), None)
-                    if cliente_id:
-                        remover_cliente(clinic_id, cliente_id)
+            cliente_para_remover_nome = st.selectbox("Selecione um cliente para remover", options=[""] + [c['nome'] for c in clientes_clinica])
+            if cliente_para_remover_nome:
+                if st.button(f"Remover {cliente_para_remover_nome}", type="primary"):
+                    cliente_id_remover = next((c['id'] for c in clientes_clinica if c['nome'] == cliente_para_remover_nome), None)
+                    if cliente_id_remover:
+                        remover_cliente(clinic_id, cliente_id_remover)
         else:
             st.info("Nenhum cliente cadastrado.")
 
@@ -614,12 +612,10 @@ def render_backoffice_clinica():
             st.info("Nenhum serviço cadastrado.")
 
     elif active_tab == "👥 Gerenciar Profissionais":
-        # Esta aba permanece a mesma
         st.header("👥 Gerenciar Profissionais")
         with st.form("add_prof_form"):
             st.text_input("Nome do Profissional", key="nome_novo_profissional")
-            if st.form_submit_button("Adicionar"):
-                handle_add_profissional()
+            st.form_submit_button("Adicionar", on_click=handle_add_profissional) # CORREÇÃO
 
         st.markdown("---")
         st.subheader("Profissionais Cadastrados")
@@ -632,7 +628,6 @@ def render_backoffice_clinica():
             st.info("Nenhum profissional cadastrado.")
 
     elif active_tab == "⚙️ Configurações":
-        # Esta aba permanece a mesma
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
         if not profissionais_clinica:
@@ -657,10 +652,7 @@ def render_backoffice_clinica():
                             cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
                         
                         submit_cols = st.columns(2)
-                        if submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True):
-                            handle_salvar_horarios_profissional(prof_id)
-                            st.rerun()
-
+                        submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True, on_click=handle_salvar_horarios_profissional, args=(prof_id,)) # CORREÇÃO
                         if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
                             st.session_state.editando_horario_id = None
                             st.rerun()
@@ -682,8 +674,7 @@ def render_backoffice_clinica():
             with st.form("add_feriado_form"):
                 st.date_input("Data do Feriado/Folga", key="nova_data_feriado")
                 st.text_input("Descrição", key="descricao_feriado", placeholder="Ex: Feriado Municipal")
-                if st.form_submit_button("Adicionar Data Bloqueada"):
-                    handle_adicionar_feriado()
+                st.form_submit_button("Adicionar Data Bloqueada", on_click=handle_adicionar_feriado) # CORREÇÃO
         with col2:
             st.write("Importar Feriados Nacionais (Brasil)")
             st.number_input("Ano", min_value=datetime.now().year, max_value=datetime.now().year + 5, key="ano_importacao", label_visibility="collapsed")
@@ -703,7 +694,8 @@ def render_backoffice_clinica():
 pin_param = st.query_params.get("pin")
 if pin_param:
     render_agendamento_seguro()
-elif st.session_state.clinic_id:
+elif 'clinic_id' in st.session_state and st.session_state.clinic_id:
     render_backoffice_clinica()
 else:
     render_login_page()
+
