@@ -50,7 +50,6 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
         dt_inicio_novo = data_hora_inicio
         dt_fim_novo = dt_inicio_novo + timedelta(minutes=duracao)
 
-        # Permite agendar no último horário exato, ex: fim 18:00, serviço de 30min às 17:30
         if not (inicio_expediente <= dt_inicio_novo.time() and dt_fim_novo.time() <= fim_expediente):
             return False, f"Fora do horário de expediente ({horario_dia['inicio']} - {horario_dia['fim']})."
     except (ValueError, KeyError):
@@ -69,7 +68,12 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
         for _, ag in agendamentos_existentes.iterrows():
             if ag['status'] == 'Confirmado':
                 dt_inicio_existente = ag['horario']
-                duracao_existente = ag.get('duracao_min', 30)
+                duracao_val = ag.get('duracao_min')
+                if pd.isna(duracao_val) or duracao_val is None:
+                    duracao_existente = 30
+                else:
+                    duracao_existente = int(duracao_val)
+                
                 dt_fim_existente = dt_inicio_existente + timedelta(minutes=duracao_existente)
                 
                 if data_hora_inicio < dt_fim_existente and dt_inicio_existente < dt_fim_novo:
@@ -191,7 +195,12 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         for _, ag in agendamentos_existentes_df.iterrows():
             if ag['status'] == 'Confirmado':
                 inicio = ag['horario']
-                duracao = ag.get('duracao_min', 30) 
+                duracao_val = ag.get('duracao_min')
+                if pd.isna(duracao_val) or duracao_val is None:
+                    duracao = 30
+                else:
+                    duracao = int(duracao_val)
+                
                 fim = inicio + timedelta(minutes=duracao)
                 agendamentos_ocupados.append((inicio, fim))
 
