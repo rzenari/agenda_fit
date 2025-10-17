@@ -1,4 +1,4 @@
-# database.py (VERSÃO MULTI-CLINICA COM GESTÃO ADMIN)
+# database.py (VERSÃO COM GESTÃO DE TURMAS)
 
 import streamlit as st
 import pandas as pd
@@ -45,7 +45,6 @@ def listar_clinicas():
 def adicionar_clinica(nome_fantasia: str, username: str, password: str):
     """Adiciona uma nova clínica à coleção principal."""
     try:
-        # Verificar se o username já existe
         query = db.collection('clinicas').where(filter=FieldFilter('username', '==', username)).limit(1)
         if any(query.stream()):
             return False, "Este nome de usuário já está em uso."
@@ -54,7 +53,7 @@ def adicionar_clinica(nome_fantasia: str, username: str, password: str):
             'nome_fantasia': nome_fantasia,
             'username': username,
             'password': password,
-            'ativo': True  # Nova clínica começa ativa por padrão
+            'ativo': True
         })
         return True, "Clínica adicionada com sucesso."
     except Exception as e:
@@ -71,14 +70,14 @@ def toggle_status_clinica(clinic_id: str, status_atual: bool):
         print(f"ERRO AO ALTERAR STATUS DA CLÍNICA: {e}")
         return False
 
-# --- Funções de Autenticação e Gestão de Clínicas ---
+# --- Funções de Autenticação ---
 def buscar_clinica_por_login(username, password):
     """Busca uma clínica ativa pelo username e password."""
     try:
         clinicas_ref = db.collection('clinicas')
         query = clinicas_ref.where(filter=FieldFilter('username', '==', username)) \
-                            .where(filter=FieldFilter('password', '==', password)) \
-                            .where(filter=FieldFilter('ativo', '==', True)).limit(1)
+                               .where(filter=FieldFilter('password', '==', password)) \
+                               .where(filter=FieldFilter('ativo', '==', True)).limit(1)
         docs = query.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -149,6 +148,7 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'servico_nome': dados['servico_nome'],
             'duracao_min': dados['duracao_min'],
             'status': "Confirmado",
+            'turma_id': dados.get('turma_id') # Adiciona o campo opcional
         }
         agendamentos_ref.add(data_para_salvar)
         return True
@@ -156,7 +156,7 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
         return str(e)
 
 def buscar_agendamento_por_pin(pin_code: str):
-    """Busca um agendamento pelo PIN (Query NoSQL)."""
+    """Busca um agendamento pelo PIN."""
     try:
         query = db.collection('agendamentos').where(filter=FieldFilter('pin_code', '==', pin_code)).limit(1)
         docs = query.stream()
@@ -177,7 +177,6 @@ def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date
         start_dt = datetime.combine(start_date, time.min, tzinfo=TZ_SAO_PAULO)
         end_dt = datetime.combine(end_date, time.max, tzinfo=TZ_SAO_PAULO)
         
-        # Consulta mais simples para evitar a necessidade de índices compostos complexos
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
         docs = query.stream()
         
@@ -187,7 +186,6 @@ def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date
             item['id'] = doc.id
             if 'horario' in item and isinstance(item['horario'], datetime):
                 item['horario'] = item['horario'].astimezone(TZ_SAO_PAULO)
-                # Filtra o intervalo de datas em memória
                 if start_dt <= item['horario'] <= end_dt:
                     data.append(item)
         
@@ -196,7 +194,6 @@ def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date
         print(f"ERRO NA BUSCA DE AGENDAMENTOS POR INTERVALO: {e}")
         return pd.DataFrame()
 
-
 def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nome: str, data_selecionada: date):
     """Busca agendamentos para um profissional específico em uma data específica."""
     try:
@@ -204,7 +201,7 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-            .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
+               .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
         
         docs = query.stream()
         data = []
@@ -279,7 +276,7 @@ def remover_feriado(clinic_id: str, feriado_id: str):
         print(f"ERRO AO REMOVER FERIADO: {e}")
         return False
 
-# --- NOVAS FUNÇÕES - Gestão de Clientes (CRM) ---
+# --- Funções de Gestão de Clientes ---
 def listar_clientes(clinic_id: str):
     """Lista todos os clientes de uma clínica."""
     try:
@@ -314,7 +311,7 @@ def remover_cliente(clinic_id: str, cliente_id: str):
         print(f"ERRO AO REMOVER CLIENTE: {e}")
         return False
 
-# --- NOVAS FUNÇÕES - Gestão de Serviços ---
+# --- Funções de Gestão de Serviços ---
 def listar_servicos(clinic_id: str):
     """Lista todos os serviços de uma clínica."""
     try:
@@ -330,11 +327,11 @@ def listar_servicos(clinic_id: str):
         print(f"ERRO AO LISTAR SERVIÇOS: {e}")
         return []
 
-def adicionar_servico(clinic_id: str, nome: str, duracao_min: int):
+def adicionar_servico(clinic_id: str, nome: str, duracao_min: int, tipo: str):
     """Adiciona um novo serviço a uma clínica."""
     try:
         servicos_ref = db.collection('clinicas').document(clinic_id).collection('servicos')
-        servicos_ref.add({'nome': nome, 'duracao_min': duracao_min})
+        servicos_ref.add({'nome': nome, 'duracao_min': duracao_min, 'tipo': tipo})
         return True
     except Exception as e:
         print(f"ERRO AO ADICIONAR SERVIÇO: {e}")
@@ -348,3 +345,71 @@ def remover_servico(clinic_id: str, servico_id: str):
     except Exception as e:
         print(f"ERRO AO REMOVER SERVIÇO: {e}")
         return False
+
+# --- NOVAS FUNÇÕES - Gestão de Turmas ---
+
+def adicionar_turma(clinic_id: str, dados_turma: dict):
+    """Adiciona uma nova turma recorrente para a clínica."""
+    try:
+        turmas_ref = db.collection('clinicas').document(clinic_id).collection('turmas')
+        turmas_ref.add(dados_turma)
+        return True
+    except Exception as e:
+        print(f"ERRO AO ADICIONAR TURMA: {e}")
+        return False
+
+def listar_turmas(clinic_id: str, profissionais_list: list = None, servicos_list: list = None):
+    """Lista todas as turmas de uma clínica, opcionalmente populando nomes."""
+    try:
+        turmas_ref = db.collection('clinicas').document(clinic_id).collection('turmas')
+        docs = turmas_ref.order_by('horario').stream()
+        turmas = []
+        for doc in docs:
+            turma = doc.to_dict()
+            turma['id'] = doc.id
+            
+            # Popula nomes se as listas forem fornecidas
+            if profissionais_list:
+                prof_id = turma.get('profissional_id')
+                prof_info = next((p for p in profissionais_list if p['id'] == prof_id), None)
+                turma['profissional_nome'] = prof_info['nome'] if prof_info else 'N/A'
+            
+            if servicos_list:
+                serv_id = turma.get('servico_id')
+                serv_info = next((s for s in servicos_list if s['id'] == serv_id), None)
+                turma['servico_nome'] = serv_info['nome'] if serv_info else 'N/A'
+            
+            turmas.append(turma)
+        return turmas
+    except Exception as e:
+        print(f"ERRO AO LISTAR TURMAS: {e}")
+        return []
+
+def remover_turma(clinic_id: str, turma_id: str):
+    """Remove uma turma da clínica."""
+    try:
+        db.collection('clinicas').document(clinic_id).collection('turmas').document(turma_id).delete()
+        return True
+    except Exception as e:
+        print(f"ERRO AO REMOVER TURMA: {e}")
+        return False
+
+def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
+    """Conta quantos agendamentos confirmados existem para uma turma específica em um dia."""
+    try:
+        start_dt = datetime.combine(data, time.min, tzinfo=TZ_SAO_PAULO)
+        end_dt = datetime.combine(data, time.max, tzinfo=TZ_SAO_PAULO)
+
+        query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+                                             .where(filter=FieldFilter('turma_id', '==', turma_id)) \
+                                             .where(filter=FieldFilter('status', '==', 'Confirmado')) \
+                                             .where(filter=FieldFilter('horario', '>=', start_dt)) \
+                                             .where(filter=FieldFilter('horario', '<=', end_dt))
+        
+        # O Firestore SDK para Python não tem um método count() direto como outras versões.
+        # Precisamos iterar para contar.
+        count = sum(1 for _ in query.stream())
+        return count
+    except Exception as e:
+        print(f"ERRO AO CONTAR AGENDAMENTOS DA TURMA: {e}")
+        return 0
