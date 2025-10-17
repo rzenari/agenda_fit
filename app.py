@@ -123,13 +123,13 @@ def handle_pre_agendamento():
     """Coleta os dados do formulário e abre o diálogo de confirmação."""
     cliente_selecionado = st.session_state.agenda_cliente_select
     if cliente_selecionado == "Novo Cliente":
-        cliente = st.session_state.c_nome_novo_cliente_input
-        telefone = st.session_state.c_tel_input
+        cliente = st.session_state.get('c_nome_novo_cliente_input', '')
+        telefone = st.session_state.get('c_tel_input', '')
     else:
         cliente = cliente_selecionado
-        telefone = st.session_state.c_tel_input
+        telefone = st.session_state.get('c_tel_input', '')
     
-    hora_consulta = st.session_state.c_hora_input
+    hora_consulta = st.session_state.get('c_hora_input')
     if not cliente or not telefone or not isinstance(hora_consulta, time):
         st.warning("Por favor, preencha o nome do cliente, telefone e selecione um horário válido.")
         return
@@ -144,6 +144,7 @@ def handle_pre_agendamento():
         'cliente_era_novo': cliente_selecionado == "Novo Cliente"
     }
     st.session_state.confirmando_agendamento = True
+    st.rerun() # Força o rerender para mostrar o diálogo
 
 def handle_agendamento_submission():
     """Lida com a criação de um novo agendamento após a confirmação."""
@@ -257,10 +258,12 @@ def handle_cancelar_selecionados():
             sucessos += 1
     st.success(f"{sucessos} de {len(ids_para_cancelar)} agendamentos cancelados com sucesso.")
     st.session_state.agendamentos_selecionados.clear()
+    st.rerun()
 
 def handle_admin_action(id_agendamento: str, acao: str):
     if acao_admin_agendamento(id_agendamento, acao):
         st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
+        st.rerun()
     else:
         st.error("Falha ao registrar a ação no sistema.")
 
@@ -328,7 +331,7 @@ def render_login_page():
     with st.form("login_form"):
         st.text_input("Usuário", key="login_username")
         st.text_input("Senha", type="password", key="login_password")
-        st.form_submit_button("Entrar", use_container_width=True, on_click=handle_login)
+        st.form_submit_button("Entrar", on_click=handle_login)
 
 def render_agendamento_seguro():
     st.title("🔒 Gestão do seu Agendamento")
@@ -377,20 +380,20 @@ def render_agendamento_seguro():
                 st.selectbox("Nova hora:", options=["Nenhum horário disponível"], key="nova_hora_remarcacao", disabled=True)
                 pode_remarcar = False
             
-            st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id'], agendamento['profissional_nome']), use_container_width=True, disabled=not pode_remarcar)
+            st.form_submit_button("✅ Confirmar Remarcação", on_click=handle_remarcar_confirmacao, args=(pin, agendamento['id'], agendamento['profissional_nome']), disabled=not pode_remarcar)
 
-        if st.button("⬅️ Voltar", use_container_width=True):
+        if st.button("⬅️ Voltar"):
             st.session_state.remarcando = False
             st.rerun()
     else:
         col1, col2 = st.columns(2)
-        if col1.button("❌ CANCELAR AGENDAMENTO", use_container_width=True, type="primary"):
+        if col1.button("❌ CANCELAR AGENDAMENTO", type="primary"):
             if processar_cancelamento_seguro(pin):
                 st.success("Agendamento cancelado com sucesso.")
             else:
                 st.error("Erro ao cancelar.")
             st.rerun()
-        if col2.button("🔄 REMARCAR HORÁRIO", use_container_width=True):
+        if col2.button("🔄 REMARCAR HORÁRIO"):
             st.session_state.remarcando = True
             st.rerun()
 
@@ -418,25 +421,26 @@ def render_backoffice_clinica():
     if active_tab == "🗓️ Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
 
-        if st.session_state.confirmando_agendamento:
-            with st.dialog("Confirmar Agendamento"):
-                detalhes = st.session_state.detalhes_agendamento
-                st.write(f"**Cliente:** {detalhes['cliente']}")
-                st.write(f"**Telefone:** {detalhes['telefone']}")
-                st.write(f"**Profissional:** {detalhes['profissional']}")
-                st.write(f"**Serviço:** {detalhes['servico']}")
-                st.write(f"**Data:** {detalhes['data'].strftime('%d/%m/%Y')}")
-                st.write(f"**Horário:** {detalhes['hora'].strftime('%H:%M')}")
-                
-                c1, c2 = st.columns(2)
-                if c1.button("✅ Confirmar", use_container_width=True):
-                    handle_agendamento_submission()
-                    st.rerun()
-                if c2.button("❌ Voltar", use_container_width=True):
-                    st.session_state.confirmando_agendamento = False
-                    st.rerun()
-
-        if not profissionais_clinica or not servicos_clinica:
+        # --- LÓGICA DE CONFIRMAÇÃO (SEM st.dialog) ---
+        if st.session_state.get('confirmando_agendamento', False):
+            st.subheader("Revisar e Confirmar Agendamento")
+            detalhes = st.session_state.detalhes_agendamento
+            st.write(f"**Cliente:** {detalhes['cliente']}")
+            st.write(f"**Telefone:** {detalhes['telefone']}")
+            st.write(f"**Profissional:** {detalhes['profissional']}")
+            st.write(f"**Serviço:** {detalhes['servico']}")
+            st.write(f"**Data:** {detalhes['data'].strftime('%d/%m/%Y')}")
+            st.write(f"**Horário:** {detalhes['hora'].strftime('%H:%M')}")
+            
+            c1, c2 = st.columns(2)
+            if c1.button("✅ Confirmar Agendamento", type="primary"):
+                handle_agendamento_submission()
+                st.rerun()
+            if c2.button("❌ Voltar"):
+                st.session_state.confirmando_agendamento = False
+                st.rerun()
+        
+        elif not profissionais_clinica or not servicos_clinica:
             st.warning("É necessário ter ao menos um profissional e um serviço cadastrado para realizar agendamentos.")
         else:
             if st.session_state.get('last_agendamento_info'):
@@ -492,7 +496,7 @@ def render_backoffice_clinica():
                     form_cols[1].selectbox("Hora:", options=["Nenhum horário disponível"], key="c_hora_input", disabled=True)
                     pode_agendar = False
 
-                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, use_container_width=True, on_click=handle_pre_agendamento)
+                st.form_submit_button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
 
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
@@ -734,8 +738,8 @@ def render_backoffice_clinica():
                             cols[2].time_input("Fim", key=f"fim_{dia_key}_{prof_id}", value=datetime.strptime(horario_dia['fim'], "%H:%M").time(), step=timedelta(minutes=30), label_visibility="collapsed")
                         
                         submit_cols = st.columns(2)
-                        submit_cols[0].form_submit_button("✅ Salvar Alterações", use_container_width=True, on_click=handle_salvar_horarios_profissional, args=(prof_id,))
-                        if submit_cols[1].form_submit_button("❌ Cancelar", use_container_width=True):
+                        submit_cols[0].form_submit_button("✅ Salvar Alterações", on_click=handle_salvar_horarios_profissional, args=(prof_id,))
+                        if submit_cols[1].form_submit_button("❌ Cancelar"):
                             st.session_state.editando_horario_id = None
                             st.rerun()
                 else:
