@@ -1,5 +1,8 @@
-# logica_negocio.py (VERSÃO COM LÓGICA DE TURMAS)
-# Nenhuma alteração foi necessária neste arquivo para as solicitações.
+# logica_negocio.py (VERSÃO COM LÓGICA DE TURMAS E PACOTES)
+# ATUALIZADO:
+# 1. Novas importações de 'database' para pacotes.
+# 2. Nova função: buscar_pacotes_validos_cliente
+# 3. Nova função: associar_pacote_cliente
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -17,7 +20,12 @@ from database import (
     adicionar_feriado,
     buscar_agendamentos_por_intervalo,
     # Funções para turmas
-    contar_agendamentos_turma_dia
+    contar_agendamentos_turma_dia,
+    # <-- NOVAS IMPORTAÇÕES PARA PACOTES -->
+    listar_pacotes_modelos,
+    listar_pacotes_do_cliente,
+    associar_pacote_ao_cliente as db_associar_pacote_ao_cliente,
+    listar_servicos # Necessário para buscar_pacotes_validos
 )
 
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
@@ -63,8 +71,6 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
 
     agendamentos_existentes = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_hora_inicio.date())
     
-    # CORREÇÃO: Verifica se a coluna 'turma_id' existe antes de filtrar.
-    # Se não existir, todos os agendamentos são considerados individuais.
     if agendamentos_existentes.empty or 'turma_id' not in agendamentos_existentes.columns:
         agendamentos_individuais = agendamentos_existentes.copy()
     else:
@@ -191,8 +197,6 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
 
     agendamentos_existentes_df = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_selecionada)
     
-    # CORREÇÃO: Verifica se a coluna 'turma_id' existe antes de filtrar.
-    # Se não existir, todos os agendamentos são considerados individuais.
     if agendamentos_existentes_df.empty or 'turma_id' not in agendamentos_existentes_df.columns:
         agendamentos_individuais_df = agendamentos_existentes_df.copy()
     else:
@@ -256,7 +260,6 @@ def gerar_turmas_disponiveis(clinic_id: str, data_selecionada: date, turmas_clin
     for turma in turmas_do_dia:
         horario_obj = datetime.strptime(turma['horario'], '%H:%M').time()
         
-        # Se for hoje, só mostra turmas futuras
         if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
             if horario_obj <= datetime.now(TZ_SAO_PAULO).time():
                 continue
@@ -285,7 +288,7 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
 
     df_prof = df_agendamentos[
         (df_agendamentos['profissional_nome'] == profissional_nome) &
-        (df_agendamentos['turma_id'].isnull()) & # Apenas agendamentos individuais
+        (df_agendamentos['turma_id'].isnull()) & 
         (df_agendamentos['status'] == 'Confirmado')
     ].copy()
     
@@ -314,7 +317,7 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
     
     df_dia = df_agendamentos[
         (df_agendamentos['status'] == 'Confirmado') &
-        (df_agendamentos['turma_id'].isnull()) # Apenas individuais
+        (df_agendamentos['turma_id'].isnull())
     ].copy()
 
     if df_dia.empty:
@@ -334,3 +337,89 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
+
+# <-- INÍCIO DAS NOVAS FUNÇÕES DE LÓGICA DE PACOTES -->
+
+def buscar_pacotes_validos_cliente(clinic_id: str, cliente_id: str, servico_id: str):
+    """
+    Busca pacotes ativos de um cliente que sejam válidos para um serviço específico.
+    """
+    if not cliente_id or not servico_id:
+        return []
+
+    # 1. Busca todos os modelos de pacotes da clínica (cacheável se necessário, mas por enquanto busca direto)
+    modelos_pacotes = listar_pacotes_modelos(clinic_id)
+    if not modelos_pacotes:
+        return []
+    
+    # 2. Busca todos os pacotes adquiridos pelo cliente
+    pacotes_cliente = listar_pacotes_do_cliente(clinic_id, cliente_id)
+    if not pacotes_cliente:
+        return []
+    
+    # 3. Filtra os pacotes válidos
+    hoje = datetime.now(TZ_SAO_PAULO)
+    pacotes_validos = []
+
+    for pc in pacotes_cliente:
+        # Filtro 1: Créditos restantes
+        if pc.get('creditos_restantes', 0) <= 0:
+            continue
+        
+        # Filtro 2: Data de expiração
+        if pc.get('data_expiracao') < hoje:
+            continue
+        
+        # Filtro 3: Serviço válido
+        # Encontra o modelo do pacote do cliente
+        modelo_id = pc.get('pacote_modelo_id')
+        modelo_correspondente = next((m for m in modelos_pacotes if m['id'] == modelo_id), None)
+        
+        if not modelo_correspondente:
+            continue # Pacote do cliente aponta para um modelo que não existe mais
+
+        servicos_validos_pacote = modelo_correspondente.get('servicos_validos', [])
+        if servico_id in servicos_validos_pacote:
+            # Pacote válido! Adiciona informação útil do modelo.
+            pc['nome_pacote'] = modelo_correspondente.get('nome', 'Pacote')
+            pacotes_validos.append(pc)
+
+    # Retorna os pacotes válidos, talvez ordenados pelo que expira primeiro?
+    return sorted(pacotes_validos, key=lambda p: p['data_expiracao'])
+
+
+def associar_pacote_cliente(clinic_id: str, cliente_id: str, pacote_modelo_id: str):
+    """
+    Associa um modelo de pacote a um cliente, calculando datas e créditos.
+    """
+    # 1. Busca o modelo do pacote
+    modelos_pacotes = listar_pacotes_modelos(clinic_id)
+    modelo_pacote = next((m for m in modelos_pacotes if m['id'] == pacote_modelo_id), None)
+    
+    if not modelo_pacote:
+        return False, "Modelo de pacote não encontrado."
+    
+    # 2. Calcula datas
+    data_inicio = datetime.now(TZ_SAO_PAULO)
+    validade_dias = modelo_pacote.get('validade_dias', 30)
+    data_expiracao = data_inicio + timedelta(days=validade_dias)
+    
+    # 3. Prepara os dados da instância do pacote do cliente
+    dados_pacote_cliente = {
+        'pacote_modelo_id': pacote_modelo_id,
+        'nome_pacote_modelo': modelo_pacote.get('nome'), # Salva nome para referência
+        'data_inicio': data_inicio,
+        'data_expiracao': data_expiracao,
+        'creditos_total': modelo_pacote.get('creditos_sessoes', 0),
+        'creditos_restantes': modelo_pacote.get('creditos_sessoes', 0),
+        'servicos_validos_ids': modelo_pacote.get('servicos_validos', []) # Salva para referência
+    }
+    
+    # 4. Salva no banco
+    sucesso = db_associar_pacote_ao_cliente(clinic_id, cliente_id, dados_pacote_cliente)
+    if sucesso:
+        return True, "Pacote associado ao cliente com sucesso."
+    else:
+        return False, "Erro ao salvar o pacote no banco de dados."
+
+# <-- FIM DAS NOVAS FUNÇÕES DE LÓGICA DE PACOTES -->
