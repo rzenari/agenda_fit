@@ -4,7 +4,8 @@
 # 2. Adicionadas funções para Pacotes (Modelos e Pacotes do Cliente).
 # 3. Adicionada lógica de `pacote_cliente_id` ao `salvar_agendamento`.
 # 4. Adicionada função `deduzir_credito_pacote_cliente` com firestore.Increment.
-# 5. [CORREÇÃO] Ajustada a query de `buscar_agendamentos_futuros_por_cliente` para buscar a partir do início do dia (00:00).
+# 5. Ajustada a query de `buscar_agendamentos_futuros_por_cliente` para buscar a partir do início do dia (00:00).
+# 6. [CORREÇÃO] Removido o `order_by('horario')` da query `buscar_agendamentos_futuros_por_cliente` para simplificar a necessidade de índices.
 
 import streamlit as st
 import pandas as pd
@@ -251,7 +252,6 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
 def buscar_agendamentos_futuros_por_cliente(clinic_id: str, nome_cliente: str):
     """Busca agendamentos futuros (Confirmados) para um cliente específico."""
     try:
-        # CORREÇÃO: Busca a partir da meia-noite de hoje em São Paulo
         hoje_sp = datetime.now(TZ_SAO_PAULO).date()
         inicio_do_dia_hoje = datetime.combine(hoje_sp, time.min, tzinfo=TZ_SAO_PAULO)
         
@@ -259,21 +259,26 @@ def buscar_agendamentos_futuros_por_cliente(clinic_id: str, nome_cliente: str):
                   .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
                   .where(filter=FieldFilter('cliente', '==', nome_cliente)) \
                   .where(filter=FieldFilter('status', '==', 'Confirmado')) \
-                  .where(filter=FieldFilter('horario', '>=', inicio_do_dia_hoje)) \
-                  .order_by('horario')
+                  .where(filter=FieldFilter('horario', '>=', inicio_do_dia_hoje))
+                  # Removido o .order_by('horario') para simplificar índice
 
         docs = query.stream()
         agendamentos = []
         for doc in docs:
             data = doc.to_dict()
             data['id'] = doc.id
-            # Garante que o horário esteja no TZ correto
             if 'horario' in data and isinstance(data['horario'], datetime):
                  data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
             agendamentos.append(data)
+            
+        # Ordena em Python se necessário (Firestore geralmente retorna ordenado pelo campo do filtro de range)
+        agendamentos.sort(key=lambda x: x['horario'])
+        
         return agendamentos
     except Exception as e:
         print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS DO CLIENTE: {e}")
+        # Em caso de erro (ex: índice faltando), retorna lista vazia
+        # Você pode verificar os logs do Streamlit/GCP para detalhes do erro
         return []
 # <-- FIM DA FUNÇÃO MODIFICADA -->
         
