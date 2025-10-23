@@ -1,9 +1,10 @@
 # logica_negocio.py (VERSÃO COM LÓGICA DE TURMAS)
+# Nenhuma alteração foi necessária neste arquivo para as solicitações.
 
 import uuid
 from datetime import datetime, date, time, timedelta
 import pandas as pd
-import random 
+import random
 from zoneinfo import ZoneInfo
 import requests # Para buscar feriados
 
@@ -69,7 +70,6 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
     else:
         agendamentos_individuais = agendamentos_existentes[agendamentos_existentes['turma_id'].isnull()]
 
-
     if agendamento_id_excluir and not agendamentos_individuais.empty:
         agendamentos_individuais = agendamentos_individuais[agendamentos_individuais['id'] != agendamento_id_excluir]
 
@@ -84,7 +84,6 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
                     return False, f"Conflito com agendamento das {dt_inicio_existente.strftime('%H:%M')}."
 
     return True, "Horário disponível."
-
 
 def processar_cancelamento_seguro(pin_code: str) -> bool:
     agendamento = buscar_agendamento_por_pin(pin_code)
@@ -218,7 +217,6 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
     while slot_candidato + timedelta(minutes=duracao_servico) <= fim_expediente_dt:
         fim_slot_candidato = slot_candidato + timedelta(minutes=duracao_servico)
         conflito = False
-
         for inicio_ocupado, fim_ocupado in blocos_ocupados:
             if slot_candidato < fim_ocupado and fim_slot_candidato > inicio_ocupado:
                 conflito = True
@@ -226,11 +224,11 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         
         if not conflito:
             horarios_disponiveis.append(slot_candidato.time())
-
+        
         slot_candidato += timedelta(minutes=intervalo_minimo)
 
     horarios_unicos = sorted(list(set(horarios_disponiveis)))
-
+    
     if data_selecionada == datetime.now(TZ_SAO_PAULO).date():
         hora_atual = datetime.now(TZ_SAO_PAULO).time()
         horarios_futuros = [h for h in horarios_unicos if h >= hora_atual]
@@ -277,7 +275,6 @@ def gerar_turmas_disponiveis(clinic_id: str, data_selecionada: date, turmas_clin
             
     return sorted(turmas_disponiveis, key=lambda t: t['horario_obj'])
 
-
 # --- Funções para Visões de Agenda ---
 def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: date):
     end_of_week = start_of_week + timedelta(days=6)
@@ -309,7 +306,6 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
     cols_presentes = [col for col in dias_ordem if col in pivot_table.columns]
     return pivot_table[cols_presentes]
 
-
 def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: list):
     df_agendamentos = buscar_agendamentos_por_intervalo(clinic_id, data, data)
 
@@ -320,7 +316,7 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
         (df_agendamentos['status'] == 'Confirmado') &
         (df_agendamentos['turma_id'].isnull()) # Apenas individuais
     ].copy()
-    
+
     if df_dia.empty:
         return pd.DataFrame(index=[], columns=nomes_profissionais).fillna('')
 
@@ -338,4 +334,3 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             pivot[prof] = ''
             
     return pivot[nomes_profissionais]
-
