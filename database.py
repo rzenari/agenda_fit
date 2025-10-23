@@ -1,11 +1,8 @@
 # database.py (VERSÃO COM GESTÃO DE TURMAS E PACOTES)
 # ATUALIZADO:
-# 1. Adicionada função `atualizar_turma`.
-# 2. Adicionadas funções para Pacotes (Modelos e Pacotes do Cliente).
-# 3. Adicionada lógica de `pacote_cliente_id` ao `salvar_agendamento`.
-# 4. Adicionada função `deduzir_credito_pacote_cliente` com firestore.Increment.
-# 5. Ajustada a query de `buscar_agendamentos_futuros_por_cliente` para buscar a partir do início do dia (00:00).
-# 6. [CORREÇÃO] Removido o `order_by('horario')` da query `buscar_agendamentos_futuros_por_cliente` para simplificar a necessidade de índices.
+# 1. [SOLUÇÃO DEFINITIVA] `salvar_agendamento` agora armazena o `cliente_id`.
+# 2. [SOLUÇÃO DEFINITIVA] `buscar_agendamentos_futuros_por_cliente` agora busca por `cliente_id` em vez de `nome_cliente` para robustez.
+# 3. Removido `order_by` da query de agendamentos futuros para evitar problemas de índice.
 
 import streamlit as st
 import pandas as pd
@@ -34,7 +31,6 @@ if db is None:
     st.stop()
 
 # --- Funções de Gestão de Clínicas (Super Admin) ---
-# (Funções listar_clinicas, adicionar_clinica, toggle_status_clinica... mantidas como estavam)
 def listar_clinicas():
     """Lista todas as clínicas cadastradas para o painel admin."""
     try:
@@ -96,7 +92,6 @@ def buscar_clinica_por_login(username, password):
         return None
 
 # --- Funções de Gestão de Profissionais ---
-# (Funções listar_profissionais, adicionar_profissional, remover_profissional, atualizar_horario_profissional... mantidas como estavam)
 def listar_profissionais(clinic_id: str):
     """Lista todos os profissionais de uma clínica específica."""
     try:
@@ -142,6 +137,8 @@ def atualizar_horario_profissional(clinic_id: str, prof_id: str, horarios: dict)
         return False
 
 # --- Funções de Gestão de Agendamentos ---
+
+# <-- FUNÇÃO MODIFICADA (1/2) -->
 def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
     """Cria um novo agendamento para uma clínica."""
     try:
@@ -151,20 +148,20 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'pin_code': pin_code,
             'profissional_nome': dados['profissional_nome'],
             'cliente': dados['cliente'],
+            'cliente_id': dados.get('cliente_id'), # <-- CAMPO ADICIONADO
             'telefone': dados['telefone'],
             'horario': dados['horario'],
             'servico_nome': dados['servico_nome'],
             'duracao_min': dados['duracao_min'],
             'status': "Confirmado",
-            'turma_id': dados.get('turma_id'), # Adiciona o campo opcional
-            'pacote_cliente_id': dados.get('pacote_cliente_id') # <-- NOVO CAMPO
+            'turma_id': dados.get('turma_id'),
+            'pacote_cliente_id': dados.get('pacote_cliente_id')
         }
         agendamentos_ref.add(data_para_salvar)
         return True
     except Exception as e:
         return str(e)
 
-# (Funções buscar_agendamento_por_pin, buscar_agendamentos_por_intervalo, buscar_agendamentos_por_data_e_profissional, atualizar_status_agendamento, atualizar_horario_agendamento... mantidas como estavam)
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN."""
     try:
@@ -248,19 +245,19 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
         print(f"ERRO AO ATUALIZAR HORÁRIO: {e}")
         return False
         
-# <-- INÍCIO DA FUNÇÃO MODIFICADA -->
-def buscar_agendamentos_futuros_por_cliente(clinic_id: str, nome_cliente: str):
-    """Busca agendamentos futuros (Confirmados) para um cliente específico."""
+# <-- FUNÇÃO MODIFICADA (2/2) -->
+def buscar_agendamentos_futuros_por_cliente(clinic_id: str, cliente_id: str):
+    """Busca agendamentos futuros (Confirmados) para um cliente específico usando seu ID."""
     try:
         hoje_sp = datetime.now(TZ_SAO_PAULO).date()
         inicio_do_dia_hoje = datetime.combine(hoje_sp, time.min, tzinfo=TZ_SAO_PAULO)
         
+        # Query agora usa 'cliente_id' para precisão
         query = db.collection('agendamentos') \
                   .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                  .where(filter=FieldFilter('cliente', '==', nome_cliente)) \
+                  .where(filter=FieldFilter('cliente_id', '==', cliente_id)) \
                   .where(filter=FieldFilter('status', '==', 'Confirmado')) \
                   .where(filter=FieldFilter('horario', '>=', inicio_do_dia_hoje))
-                  # Removido o .order_by('horario') para simplificar índice
 
         docs = query.stream()
         agendamentos = []
@@ -271,19 +268,16 @@ def buscar_agendamentos_futuros_por_cliente(clinic_id: str, nome_cliente: str):
                  data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
             agendamentos.append(data)
             
-        # Ordena em Python se necessário (Firestore geralmente retorna ordenado pelo campo do filtro de range)
+        # Ordena em Python para não depender de índices complexos do Firestore
         agendamentos.sort(key=lambda x: x['horario'])
         
         return agendamentos
     except Exception as e:
-        print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS DO CLIENTE: {e}")
-        # Em caso de erro (ex: índice faltando), retorna lista vazia
-        # Você pode verificar os logs do Streamlit/GCP para detalhes do erro
+        print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS DO CLIENTE (por ID): {e}")
         return []
 # <-- FIM DA FUNÇÃO MODIFICADA -->
         
 # --- Funções de Gestão de Feriados ---
-# (Funções adicionar_feriado, listar_feriados, remover_feriado... mantidas como estavam)
 def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
     """Adiciona um feriado ou folga para uma clínica."""
     try:
@@ -322,7 +316,6 @@ def remover_feriado(clinic_id: str, feriado_id: str):
         return False
 
 # --- Funções de Gestão de Clientes ---
-# (Funções listar_clientes, adicionar_cliente, remover_cliente... mantidas como estavam)
 def listar_clientes(clinic_id: str):
     """Lista todos os clientes de uma clínica."""
     try:
@@ -358,7 +351,6 @@ def remover_cliente(clinic_id: str, cliente_id: str):
         return False
 
 # --- Funções de Gestão de Serviços ---
-# (Funções listar_servicos, adicionar_servico, remover_servico... mantidas como estavam)
 def listar_servicos(clinic_id: str):
     """Lista todos os serviços de uma clínica."""
     try:
@@ -394,7 +386,6 @@ def remover_servico(clinic_id: str, servico_id: str):
         return False
 
 # --- Funções - Gestão de Turmas ---
-# (Funções adicionar_turma, listar_turmas, remover_turma, atualizar_turma, contar_agendamentos_turma_dia... mantidas como estavam)
 def adicionar_turma(clinic_id: str, dados_turma: dict):
     """Adiciona uma nova turma recorrente para a clínica."""
     try:
@@ -415,7 +406,6 @@ def listar_turmas(clinic_id: str, profissionais_list: list = None, servicos_list
             turma = doc.to_dict()
             turma['id'] = doc.id
             
-            # Popula nomes se as listas forem fornecidas
             if profissionais_list:
                 prof_id = turma.get('profissional_id')
                 prof_info = next((p for p in profissionais_list if p['id'] == prof_id), None)
@@ -472,7 +462,6 @@ def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
 # --- NOVAS FUNÇÕES - Gestão de Pacotes ---
 
 # 1. Funções para Modelos de Pacotes (Gerenciados pela Clínica)
-
 def listar_pacotes_modelos(clinic_id: str):
     """Lista todos os modelos de pacotes criados pela clínica."""
     try:
@@ -508,7 +497,6 @@ def remover_pacote_modelo(clinic_id: str, pacote_id: str):
         return False
 
 # 2. Funções para Pacotes dos Clientes (Instâncias individuais)
-
 def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
     """Lista todos os pacotes adquiridos por um cliente específico."""
     try:
@@ -521,7 +509,6 @@ def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
         for doc in docs:
             pacote = doc.to_dict()
             pacote['id'] = doc.id
-            # Converte timestamps do Firestore para objetos date/datetime de Python
             if 'data_inicio' in pacote and isinstance(pacote['data_inicio'], datetime):
                 pacote['data_inicio'] = pacote['data_inicio'].astimezone(TZ_SAO_PAULO)
             if 'data_expiracao' in pacote and isinstance(pacote['data_expiracao'], datetime):
@@ -551,7 +538,6 @@ def deduzir_credito_pacote_cliente(clinic_id: str, cliente_id: str, pacote_clien
                        .collection('clientes').document(cliente_id) \
                        .collection('pacotes_clientes').document(pacote_cliente_id)
         
-        # Usa firestore.Increment para uma dedução atômica
         pacote_ref.update({
             'creditos_restantes': firestore.Increment(-1)
         })
@@ -559,3 +545,4 @@ def deduzir_credito_pacote_cliente(clinic_id: str, cliente_id: str, pacote_clien
     except Exception as e:
         print(f"ERRO AO DEDUZIR CRÉDITO DO PACOTE: {e}")
         return False
+
