@@ -246,6 +246,34 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
         print(f"ERRO AO ATUALIZAR HORÁRIO: {e}")
         return False
         
+# <-- INÍCIO DA NOVA FUNÇÃO -->
+def buscar_agendamentos_futuros_por_cliente(clinic_id: str, nome_cliente: str):
+    """Busca agendamentos futuros (Confirmados) para um cliente específico."""
+    try:
+        agora = datetime.now(TZ_SAO_PAULO)
+        
+        query = db.collection('agendamentos') \
+                  .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+                  .where(filter=FieldFilter('cliente', '==', nome_cliente)) \
+                  .where(filter=FieldFilter('status', '==', 'Confirmado')) \
+                  .where(filter=FieldFilter('horario', '>=', agora)) \
+                  .order_by('horario')
+
+        docs = query.stream()
+        agendamentos = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            # Garante que o horário esteja no TZ correto
+            if 'horario' in data and isinstance(data['horario'], datetime):
+                 data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
+            agendamentos.append(data)
+        return agendamentos
+    except Exception as e:
+        print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS DO CLIENTE: {e}")
+        return []
+# <-- FIM DA NOVA FUNÇÃO -->
+        
 # --- Funções de Gestão de Feriados ---
 # (Funções adicionar_feriado, listar_feriados, remover_feriado... mantidas como estavam)
 def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
@@ -523,3 +551,4 @@ def deduzir_credito_pacote_cliente(clinic_id: str, cliente_id: str, pacote_clien
     except Exception as e:
         print(f"ERRO AO DEDUZIR CRÉDITO DO PACOTE: {e}")
         return False
+
