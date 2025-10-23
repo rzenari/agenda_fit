@@ -1,4 +1,6 @@
 # database.py (VERSÃO COM GESTÃO DE TURMAS)
+# ATUALIZADO:
+# 1. Adicionada função `atualizar_turma`.
 
 import streamlit as st
 import pandas as pd
@@ -48,7 +50,7 @@ def adicionar_clinica(nome_fantasia: str, username: str, password: str):
         query = db.collection('clinicas').where(filter=FieldFilter('username', '==', username)).limit(1)
         if any(query.stream()):
             return False, "Este nome de usuário já está em uso."
-
+        
         db.collection('clinicas').add({
             'nome_fantasia': nome_fantasia,
             'username': username,
@@ -76,8 +78,8 @@ def buscar_clinica_por_login(username, password):
     try:
         clinicas_ref = db.collection('clinicas')
         query = clinicas_ref.where(filter=FieldFilter('username', '==', username)) \
-                               .where(filter=FieldFilter('password', '==', password)) \
-                               .where(filter=FieldFilter('ativo', '==', True)).limit(1)
+                            .where(filter=FieldFilter('password', '==', password)) \
+                            .where(filter=FieldFilter('ativo', '==', True)).limit(1)
         docs = query.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -201,8 +203,8 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-               .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
-        
+                                        .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
+
         docs = query.stream()
         data = []
         for doc in docs:
@@ -394,6 +396,18 @@ def remover_turma(clinic_id: str, turma_id: str):
         print(f"ERRO AO REMOVER TURMA: {e}")
         return False
 
+# <-- INÍCIO DA NOVA FUNÇÃO -->
+def atualizar_turma(clinic_id: str, turma_id: str, dados_turma: dict):
+    """Atualiza os dados de uma turma existente."""
+    try:
+        turma_ref = db.collection('clinicas').document(clinic_id).collection('turmas').document(turma_id)
+        turma_ref.update(dados_turma)
+        return True
+    except Exception as e:
+        print(f"ERRO AO ATUALIZAR TURMA: {e}")
+        return False
+# <-- FIM DA NOVA FUNÇÃO -->
+
 def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
     """Conta quantos agendamentos confirmados existem para uma turma específica em um dia."""
     try:
@@ -401,10 +415,10 @@ def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
         end_dt = datetime.combine(data, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                                             .where(filter=FieldFilter('turma_id', '==', turma_id)) \
-                                             .where(filter=FieldFilter('status', '==', 'Confirmado')) \
-                                             .where(filter=FieldFilter('horario', '>=', start_dt)) \
-                                             .where(filter=FieldFilter('horario', '<=', end_dt))
+                                        .where(filter=FieldFilter('turma_id', '==', turma_id)) \
+                                        .where(filter=FieldFilter('status', '==', 'Confirmado')) \
+                                        .where(filter=FieldFilter('horario', '>=', start_dt)) \
+                                        .where(filter=FieldFilter('horario', '<=', end_dt))
         
         # O Firestore SDK para Python não tem um método count() direto como outras versões.
         # Precisamos iterar para contar.
