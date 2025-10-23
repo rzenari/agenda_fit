@@ -1,12 +1,15 @@
-# database.py (VERSÃO COM GESTÃO DE TURMAS)
+# database.py (VERSÃO COM GESTÃO DE TURMAS E PACOTES)
 # ATUALIZADO:
 # 1. Adicionada função `atualizar_turma`.
+# 2. Adicionadas funções para Pacotes (Modelos e Pacotes do Cliente).
+# 3. Adicionada lógica de `pacote_cliente_id` ao `salvar_agendamento`.
+# 4. Adicionada função `deduzir_credito_pacote_cliente` com firestore.Increment.
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, date, timedelta
 import json
-from google.cloud import firestore
+from google.cloud import firestore  # Importação principal
 from google.cloud.firestore_v1.base_query import FieldFilter
 from zoneinfo import ZoneInfo
 
@@ -29,7 +32,7 @@ if db is None:
     st.stop()
 
 # --- Funções de Gestão de Clínicas (Super Admin) ---
-
+# (Funções listar_clinicas, adicionar_clinica, toggle_status_clinica... mantidas como estavam)
 def listar_clinicas():
     """Lista todas as clínicas cadastradas para o painel admin."""
     try:
@@ -78,8 +81,8 @@ def buscar_clinica_por_login(username, password):
     try:
         clinicas_ref = db.collection('clinicas')
         query = clinicas_ref.where(filter=FieldFilter('username', '==', username)) \
-                            .where(filter=FieldFilter('password', '==', password)) \
-                            .where(filter=FieldFilter('ativo', '==', True)).limit(1)
+                           .where(filter=FieldFilter('password', '==', password)) \
+                           .where(filter=FieldFilter('ativo', '==', True)).limit(1)
         docs = query.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -91,6 +94,7 @@ def buscar_clinica_por_login(username, password):
         return None
 
 # --- Funções de Gestão de Profissionais ---
+# (Funções listar_profissionais, adicionar_profissional, remover_profissional, atualizar_horario_profissional... mantidas como estavam)
 def listar_profissionais(clinic_id: str):
     """Lista todos os profissionais de uma clínica específica."""
     try:
@@ -150,13 +154,15 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'servico_nome': dados['servico_nome'],
             'duracao_min': dados['duracao_min'],
             'status': "Confirmado",
-            'turma_id': dados.get('turma_id') # Adiciona o campo opcional
+            'turma_id': dados.get('turma_id'), # Adiciona o campo opcional
+            'pacote_cliente_id': dados.get('pacote_cliente_id') # <-- NOVO CAMPO
         }
         agendamentos_ref.add(data_para_salvar)
         return True
     except Exception as e:
         return str(e)
 
+# (Funções buscar_agendamento_por_pin, buscar_agendamentos_por_intervalo, buscar_agendamentos_por_data_e_profissional, atualizar_status_agendamento, atualizar_horario_agendamento... mantidas como estavam)
 def buscar_agendamento_por_pin(pin_code: str):
     """Busca um agendamento pelo PIN."""
     try:
@@ -203,7 +209,7 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                                        .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
+                                             .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
 
         docs = query.stream()
         data = []
@@ -241,6 +247,7 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
         return False
         
 # --- Funções de Gestão de Feriados ---
+# (Funções adicionar_feriado, listar_feriados, remover_feriado... mantidas como estavam)
 def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
     """Adiciona um feriado ou folga para uma clínica."""
     try:
@@ -279,6 +286,7 @@ def remover_feriado(clinic_id: str, feriado_id: str):
         return False
 
 # --- Funções de Gestão de Clientes ---
+# (Funções listar_clientes, adicionar_cliente, remover_cliente... mantidas como estavam)
 def listar_clientes(clinic_id: str):
     """Lista todos os clientes de uma clínica."""
     try:
@@ -314,6 +322,7 @@ def remover_cliente(clinic_id: str, cliente_id: str):
         return False
 
 # --- Funções de Gestão de Serviços ---
+# (Funções listar_servicos, adicionar_servico, remover_servico... mantidas como estavam)
 def listar_servicos(clinic_id: str):
     """Lista todos os serviços de uma clínica."""
     try:
@@ -348,8 +357,8 @@ def remover_servico(clinic_id: str, servico_id: str):
         print(f"ERRO AO REMOVER SERVIÇO: {e}")
         return False
 
-# --- NOVAS FUNÇÕES - Gestão de Turmas ---
-
+# --- Funções - Gestão de Turmas ---
+# (Funções adicionar_turma, listar_turmas, remover_turma, atualizar_turma, contar_agendamentos_turma_dia... mantidas como estavam)
 def adicionar_turma(clinic_id: str, dados_turma: dict):
     """Adiciona uma nova turma recorrente para a clínica."""
     try:
@@ -396,7 +405,6 @@ def remover_turma(clinic_id: str, turma_id: str):
         print(f"ERRO AO REMOVER TURMA: {e}")
         return False
 
-# <-- INÍCIO DA NOVA FUNÇÃO -->
 def atualizar_turma(clinic_id: str, turma_id: str, dados_turma: dict):
     """Atualiza os dados de uma turma existente."""
     try:
@@ -406,7 +414,6 @@ def atualizar_turma(clinic_id: str, turma_id: str, dados_turma: dict):
     except Exception as e:
         print(f"ERRO AO ATUALIZAR TURMA: {e}")
         return False
-# <-- FIM DA NOVA FUNÇÃO -->
 
 def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
     """Conta quantos agendamentos confirmados existem para uma turma específica em um dia."""
@@ -415,15 +422,104 @@ def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
         end_dt = datetime.combine(data, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                                        .where(filter=FieldFilter('turma_id', '==', turma_id)) \
-                                        .where(filter=FieldFilter('status', '==', 'Confirmado')) \
-                                        .where(filter=FieldFilter('horario', '>=', start_dt)) \
-                                        .where(filter=FieldFilter('horario', '<=', end_dt))
+                                             .where(filter=FieldFilter('turma_id', '==', turma_id)) \
+                                             .where(filter=FieldFilter('status', '==', 'Confirmado')) \
+                                             .where(filter=FieldFilter('horario', '>=', start_dt)) \
+                                             .where(filter=FieldFilter('horario', '<=', end_dt))
         
-        # O Firestore SDK para Python não tem um método count() direto como outras versões.
-        # Precisamos iterar para contar.
         count = sum(1 for _ in query.stream())
         return count
     except Exception as e:
         print(f"ERRO AO CONTAR AGENDAMENTOS DA TURMA: {e}")
         return 0
+
+# --- NOVAS FUNÇÕES - Gestão de Pacotes ---
+
+# 1. Funções para Modelos de Pacotes (Gerenciados pela Clínica)
+
+def listar_pacotes_modelos(clinic_id: str):
+    """Lista todos os modelos de pacotes criados pela clínica."""
+    try:
+        pacotes_ref = db.collection('clinicas').document(clinic_id).collection('pacotes')
+        docs = pacotes_ref.order_by('nome').stream()
+        pacotes = []
+        for doc in docs:
+            pacote = doc.to_dict()
+            pacote['id'] = doc.id
+            pacotes.append(pacote)
+        return pacotes
+    except Exception as e:
+        print(f"ERRO AO LISTAR MODELOS DE PACOTES: {e}")
+        return []
+
+def adicionar_pacote_modelo(clinic_id: str, dados_pacote: dict):
+    """Adiciona um novo modelo de pacote."""
+    try:
+        pacotes_ref = db.collection('clinicas').document(clinic_id).collection('pacotes')
+        pacotes_ref.add(dados_pacote)
+        return True
+    except Exception as e:
+        print(f"ERRO AO ADICIONAR MODELO DE PACOTE: {e}")
+        return False
+
+def remover_pacote_modelo(clinic_id: str, pacote_id: str):
+    """Remove um modelo de pacote."""
+    try:
+        db.collection('clinicas').document(clinic_id).collection('pacotes').document(pacote_id).delete()
+        return True
+    except Exception as e:
+        print(f"ERRO AO REMOVER MODELO DE PACOTE: {e}")
+        return False
+
+# 2. Funções para Pacotes dos Clientes (Instâncias individuais)
+
+def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
+    """Lista todos os pacotes adquiridos por um cliente específico."""
+    try:
+        pacotes_ref = db.collection('clinicas').document(clinic_id) \
+                        .collection('clientes').document(cliente_id) \
+                        .collection('pacotes_clientes')
+        
+        docs = pacotes_ref.order_by('data_expiracao', direction=firestore.Query.DESCENDING).stream()
+        pacotes = []
+        for doc in docs:
+            pacote = doc.to_dict()
+            pacote['id'] = doc.id
+            # Converte timestamps do Firestore para objetos date/datetime de Python
+            if 'data_inicio' in pacote and isinstance(pacote['data_inicio'], datetime):
+                pacote['data_inicio'] = pacote['data_inicio'].astimezone(TZ_SAO_PAULO)
+            if 'data_expiracao' in pacote and isinstance(pacote['data_expiracao'], datetime):
+                pacote['data_expiracao'] = pacote['data_expiracao'].astimezone(TZ_SAO_PAULO)
+            pacotes.append(pacote)
+        return pacotes
+    except Exception as e:
+        print(f"ERRO AO LISTAR PACOTES DO CLIENTE: {e}")
+        return []
+
+def associar_pacote_ao_cliente(clinic_id: str, cliente_id: str, dados_pacote_cliente: dict):
+    """Associa/vende um pacote a um cliente."""
+    try:
+        pacotes_ref = db.collection('clinicas').document(clinic_id) \
+                        .collection('clientes').document(cliente_id) \
+                        .collection('pacotes_clientes')
+        pacotes_ref.add(dados_pacote_cliente)
+        return True
+    except Exception as e:
+        print(f"ERRO AO ASSOCIAR PACOTE AO CLIENTE: {e}")
+        return False
+
+def deduzir_credito_pacote_cliente(clinic_id: str, cliente_id: str, pacote_cliente_id: str):
+    """Deduz 1 crédito de um pacote específico do cliente usando Increment."""
+    try:
+        pacote_ref = db.collection('clinicas').document(clinic_id) \
+                       .collection('clientes').document(cliente_id) \
+                       .collection('pacotes_clientes').document(pacote_cliente_id)
+        
+        # Usa firestore.Increment para uma dedução atômica
+        pacote_ref.update({
+            'creditos_restantes': firestore.Increment(-1)
+        })
+        return True
+    except Exception as e:
+        print(f"ERRO AO DEDUZIR CRÉDITO DO PACOTE: {e}")
+        return False
