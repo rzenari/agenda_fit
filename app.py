@@ -3,9 +3,9 @@
 # 1. Adicionada a aba "🛍️ Gerenciar Pacotes" para criar modelos de pacotes.
 # 2. Modificada a aba "👤 Gerenciar Clientes" para:
 #    - Associar pacotes a clientes e visualizar seus históricos.
-#    - [NOVO] Listar agendamentos futuros (individuais e turmas) do cliente.
-#    - [NOVO] Permitir o CANCELAMENTO de qualquer agendamento futuro (individual ou turma).
-#    - [NOVO] Permitir a REMARCAÇÃO de agendamentos futuros (apenas individuais) diretamente na tela do cliente.
+#    - [CORRIGIDO] Listar agendamentos futuros (individuais e turmas) do cliente, incluindo o dia atual.
+#    - [ATUALIZADO] Exibir a barra de ferramentas de admin COMPLETA (Info, WPP, Finalizar, No-Show, Cancelar) para cada agendamento.
+#    - Manter a funcionalidade de "Remarcar" (agora 🔄) para agendamentos individuais.
 # 3. Modificada a aba "🗓️ Agenda e Agendamento" para:
 #    - Verificar automaticamente pacotes válidos na seleção de cliente/serviço.
 #    - Exibir o status do pacote.
@@ -127,7 +127,7 @@ if 'pacotes_validos_cliente' not in st.session_state:
 if 'pacote_status_placeholder' not in st.session_state:
     st.session_state.pacote_status_placeholder = None 
 
-# <-- NOVOS STATES PARA REMARCAÇÃO NA TELA DE CLIENTE -->
+# States para Remarcação na tela de Cliente
 if 'remarcando_cliente_ag_id' not in st.session_state:
     st.session_state.remarcando_cliente_ag_id = None # Armazena o ID do agendamento sendo remarcado
 if 'remarcacao_cliente_status' not in st.session_state:
@@ -658,7 +658,7 @@ def handle_associar_pacote_cliente(cliente_id: str):
     else:
         st.error(msg)
         
-# <-- NOVOS HANDLERS PARA REMARCAÇÃO NA TELA DE CLIENTE -->
+# Handlers para Remarcação na tela de Cliente
 def handle_iniciar_remarcacao_cliente(agendamento: dict):
     """Define o estado para mostrar o formulário de remarcação na tela do cliente."""
     ag_id = agendamento['id']
@@ -690,12 +690,6 @@ def handle_confirmar_remarcacao_cliente(agendamento: dict):
     novo_horario_naive = datetime.combine(nova_data, nova_hora)
     novo_horario_local = novo_horario_naive.replace(tzinfo=TZ_SAO_PAULO)
     
-    # Usamos a função processar_remarcacao, mas passamos None para o PIN,
-    # pois estamos logados como admin. A função (se modificada) pode tratar isso.
-    # Por enquanto, vamos usar a lógica direta de 'processar_remarcacao'
-    # NOTA: A função 'processar_remarcacao' existente espera um PIN.
-    # Vamos simular o processo dela aqui.
-    
     clinic_id = agendamento['clinic_id']
     profissional_nome = agendamento['profissional_nome']
     duracao = agendamento.get('duracao_min', 30)
@@ -711,7 +705,6 @@ def handle_confirmar_remarcacao_cliente(agendamento: dict):
     if not disponivel:
         st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': False, 'mensagem': msg}
     else:
-        # Importa a função de DB necessária
         from database import atualizar_horario_agendamento
         if atualizar_horario_agendamento(ag_id, novo_horario_local):
             st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': True, 'mensagem': "Remarcado com sucesso!"}
@@ -753,8 +746,6 @@ def render_agendamento_seguro():
         
     if agendamento.get('turma_id'):
         st.info("Agendamentos de turmas não podem ser remarcados ou cancelados individualmente por este link.")
-        # Se desejar permitir o cancelamento de turma pelo PIN, remova este bloco.
-        # Por ora, mantemos a regra original.
         return
         
     if agendamento['status'] != "Confirmado":
@@ -1294,6 +1285,7 @@ def render_backoffice_clinica():
                 else:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
 
+    # <-- INÍCIO DAS MODIFICAÇÕES NA ABA CLIENTES -->
     elif active_tab == "👤 Gerenciar Clientes":
         st.header("👤 Gerenciar Clientes")
         with st.form("add_cliente_form"):
@@ -1364,10 +1356,11 @@ def render_backoffice_clinica():
                             args=(cliente['id'],)
                         )
 
-                    # <-- NOVA SEÇÃO DE AGENDAMENTOS FUTUROS -->
+                    # <-- SEÇÃO DE AGENDAMENTOS FUTUROS ATUALIZADA -->
                     st.divider()
                     st.subheader("Agendamentos Futuros")
                     
+                    # Usa a função corrigida do database.py
                     agendamentos_futuros = buscar_agendamentos_futuros_por_cliente(clinic_id, cliente['nome'])
                     
                     if not agendamentos_futuros:
@@ -1379,32 +1372,71 @@ def render_backoffice_clinica():
                             # Define o que será exibido
                             if ag.get('turma_id'):
                                 tipo_ag = f"Turma: {turmas_map.get(ag['turma_id'], 'N/A')}"
-                                pode_remarcar = False
+                                pode_remarcar = False # Não pode remarcar turma
                             else:
                                 tipo_ag = f"Serviço: {ag.get('servico_nome', 'N/A')}"
                                 pode_remarcar = True # Só pode remarcar individual
 
-                            st.markdown(f"**{ag['horario'].strftime('%d/%m/%Y às %H:%M')}** - {ag['profissional_nome']} ({tipo_ag})")
+                            # Layout: Coluna de Info | Coluna de Botões
+                            info_cols, button_cols = st.columns([0.6, 0.4])
 
-                            cols_ag = st.columns([0.2, 0.2, 0.6])
-                            
-                            # Botão Cancelar (Funciona para individual e turma)
-                            cols_ag[0].button(
-                                "❌ Cancelar", 
-                                key=f"cancel_ag_cliente_{ag_id}", 
-                                on_click=handle_admin_action, 
-                                args=(ag_id, "cancelar"),
-                                help="Cancelar agendamento (individual ou turma)"
-                            )
+                            with info_cols:
+                                st.write(f"**{ag['horario'].strftime('%d/%m/%Y às %H:%M')}**")
+                                st.write(f"<small>{ag['profissional_nome']} ({tipo_ag})</small>", unsafe_allow_html=True)
+                                if ag.get('pacote_cliente_id'):
+                                    st.caption("💳 Agendamento via Pacote")
 
-                            # Botão Remarcar (Apenas individual)
-                            if pode_remarcar:
-                                cols_ag[1].button(
-                                    "🔄 Remarcar", 
-                                    key=f"remarcar_ag_cliente_{ag_id}", 
-                                    on_click=handle_iniciar_remarcacao_cliente,
-                                    args=(ag,)
-                                )
+                            with button_cols:
+                                # Define o número de colunas dos botões (com ou sem remarcar)
+                                num_cols = 6 if pode_remarcar else 5
+                                action_cols = st.columns(num_cols)
+                                
+                                # Chaves prefixadas com "cl_" (cliente) e ag_id para serem únicas
+                                
+                                # 1. Popover Detalhes (ℹ️)
+                                detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes", key=f"cl_info_{ag_id}")
+                                with detalhes_popover:
+                                    pin = ag.get('pin_code', 'N/A')
+                                    link = f"https://agendafit.streamlit.app?pin={pin}"
+                                    st.markdown(f"**Serviço:** {ag.get('servico_nome', 'N/A')}")
+                                    st.markdown(f"**Telefone:** {ag.get('telefone', 'N/A')}")
+                                    st.markdown(f"**PIN:** `{pin}`")
+                                    st.markdown(f"**Link:** `{link}`")
+                                    if pd.notna(ag.get('pacote_cliente_id')):
+                                        st.markdown(f"**Usou Pacote:** Sim")
+
+                                # 2. Popover WPP (💬)
+                                wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp", key=f"cl_wpp_{ag_id}")
+                                with wpp_popover:
+                                    pin = ag.get('pin_code', 'N/A')
+                                    link_gestao = f"https://agendafit.streamlit.app?pin={pin}"
+                                    mensagem = (
+                                        f"Olá, {ag['cliente']}! Tudo bem?\n\n"
+                                        f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {ag['profissional_nome']} "
+                                        f"no dia {ag['horario'].strftime('%d/%m/%Y')} às {ag['horario'].strftime('%H:%M')}.\n\n"
+                                        f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                                    )
+                                    st.text_area("Mensagem:", value=mensagem, height=200, key=f"cl_wpp_msg_{ag_id}")
+                                    st.write("Copie a mensagem acima e envie para o cliente.")
+
+                                # 3. Botão Finalizar (✅)
+                                action_cols[2].button("✅", key=f"cl_finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                                
+                                # 4. Botão No-Show (🚫)
+                                action_cols[3].button("🚫", key=f"cl_noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                                
+                                # 5. Botão Cancelar (❌) - Funciona para turma ou individual
+                                action_cols[4].button("❌", key=f"cl_cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+
+                                # 6. Botão Remarcar (🔄) - Condicional
+                                if pode_remarcar:
+                                    action_cols[5].button(
+                                        "🔄", 
+                                        key=f"cl_remarcar_{ag_id}", 
+                                        on_click=handle_iniciar_remarcacao_cliente,
+                                        args=(ag,),
+                                        help="Remarcar Horário"
+                                    )
                             
                             # Formulário de Remarcação (se estiver no modo de remarcação)
                             if st.session_state.remarcando_cliente_ag_id == ag_id:
@@ -1472,9 +1504,10 @@ def render_backoffice_clinica():
                                     else:
                                         st.error(status_msg.get('mensagem'))
 
-                            st.divider()
+                            st.divider() # Divisor para cada agendamento
         else:
             st.info("Nenhum cliente cadastrado.")
+    # <-- FIM DAS MODIFICAÇÕES NA ABA CLIENTES -->
 
 
     elif active_tab == "📋 Gerenciar Serviços":
