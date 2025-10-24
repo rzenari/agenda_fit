@@ -4,6 +4,16 @@
 # 2. [SOLUÇÃO DEFINITIVA] `buscar_agendamentos_futuros_por_cliente` agora busca por `cliente_id`.
 # 3. Removido `order_by` da query de agendamentos futuros.
 # 4. [DIAGNÓSTICO] Adicionados logs detalhados em `buscar_agendamentos_futuros_por_cliente`.
+# --- INÍCIO DAS NOVAS ATUALIZAÇÕES ---
+# 5. (Feature 4) `salvar_agendamento`: Status padrão alterado para "Pendente".
+# 6. (Feature 4) `buscar_agendamentos_futuros_por_cliente`: Modificado para buscar "Pendente" OU "Confirmado".
+# 7. (Feature 1) Nova função: `verificar_cliente_ja_na_turma`.
+# 8. (Feature 2a) Nova função: `atualizar_profissional_agendamento`.
+# 9. (Feature 2c) Nova função: `buscar_agendamentos_futuros_por_profissional`.
+# 10. (Feature 2c) Nova função: `desassociar_profissional_agendamento`.
+# 11. (Feature 2c) Nova função: `buscar_agendamentos_sem_profissional`.
+# 12. (Feature 3) Nova função: `get_pacote_cliente_by_id`.
+# --- FIM DAS NOVAS ATUALIZAÇÕES ---
 
 import streamlit as st
 import pandas as pd
@@ -88,8 +98,9 @@ def buscar_clinica_por_login(username, password):
         clinicas_ref = db.collection('clinicas')
         # Atenção: Armazenar senhas em texto plano não é seguro.
         query = clinicas_ref.where(filter=FieldFilter('username', '==', username)) \
-                           .where(filter=FieldFilter('password', '==', password)) \
-                           .where(filter=FieldFilter('ativo', '==', True)).limit(1)
+                            .where(filter=FieldFilter('password', '==', password)) \
+                            .where(filter=FieldFilter('ativo', '==', True)).limit(1)
+        
         docs = query.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -151,8 +162,10 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
     """Cria um novo agendamento para uma clínica."""
     try:
         agendamentos_ref = db.collection('agendamentos')
+        
         cliente_id_val = dados.get('cliente_id')
         print(f"LOG: Salvando agendamento. Cliente ID recebido: {cliente_id_val}", file=sys.stderr) # Log ID
+
         data_para_salvar = {
             'clinic_id': clinic_id,
             'pin_code': pin_code,
@@ -163,13 +176,13 @@ def salvar_agendamento(clinic_id: str, dados: dict, pin_code: str):
             'horario': dados['horario'],
             'servico_nome': dados['servico_nome'],
             'duracao_min': dados['duracao_min'],
-            'status': "Confirmado",
+            'status': "Pendente", # (Feature 4) Alterado de "Confirmado" para "Pendente"
             'turma_id': dados.get('turma_id'),
             'pacote_cliente_id': dados.get('pacote_cliente_id')
         }
         print(f"LOG: Dados a serem salvos no agendamento: {data_para_salvar}", file=sys.stderr) # Log Dados
         agendamentos_ref.add(data_para_salvar)
-        print("LOG: Agendamento salvo com sucesso.", file=sys.stderr) # Log Sucesso
+        print("LOG: Agendamento salvo com sucesso (status Pendente).", file=sys.stderr) # Log Sucesso
         return True
     except Exception as e:
         print(f"ERRO AO SALVAR AGENDAMENTO: {e}", file=sys.stderr) # Log Erro
@@ -198,13 +211,15 @@ def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date
         end_dt = datetime.combine(end_date, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id))
+        
         # REMOVIDO FILTRO DE HORARIO DA QUERY - FILTRADO EM PYTHON ABAIXO
         # Isso evita a necessidade de um índice composto clinic_id + horario
         docs = query.stream()
-
+        
         data = []
         count_docs_total = 0
         count_docs_filtrados = 0
+        
         for doc in docs:
             count_docs_total += 1
             item = doc.to_dict()
@@ -216,15 +231,13 @@ def buscar_agendamentos_por_intervalo(clinic_id: str, start_date: date, end_date
                     data.append(item)
                     count_docs_filtrados += 1
             elif 'horario' not in item or not isinstance(item['horario'], datetime):
-                 print(f"WARN: Agendamento ID {doc.id} sem 'horario' válido.", file=sys.stderr)
-
-
+                print(f"WARN: Agendamento ID {doc.id} sem 'horario' válido.", file=sys.stderr)
+        
         print(f"LOG: buscar_agendamentos_por_intervalo ({clinic_id}, {start_date} a {end_date}): {count_docs_total} docs lidos, {count_docs_filtrados} no intervalo.", file=sys.stderr)
         return pd.DataFrame(data)
     except Exception as e:
         print(f"ERRO NA BUSCA DE AGENDAMENTOS POR INTERVALO: {e}", file=sys.stderr)
         return pd.DataFrame()
-
 
 def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nome: str, data_selecionada: date):
     """Busca agendamentos para um profissional específico em uma data específica."""
@@ -233,13 +246,15 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
         end_dt = datetime.combine(data_selecionada, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                                             .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
+                                        .where(filter=FieldFilter('profissional_nome', '==', profissional_nome))
         # REMOVIDO FILTRO DE HORARIO DA QUERY - FILTRADO EM PYTHON ABAIXO
-
+        
         docs = query.stream()
+        
         data = []
         count_docs_total = 0
         count_docs_filtrados = 0
+        
         for doc in docs:
             count_docs_total += 1
             item = doc.to_dict()
@@ -256,7 +271,6 @@ def buscar_agendamentos_por_data_e_profissional(clinic_id: str, profissional_nom
     except Exception as e:
         print(f"ERRO NA BUSCA POR DATA E PROFISSIONAL: {e}", file=sys.stderr)
         return pd.DataFrame()
-
 
 def atualizar_status_agendamento(id_agendamento: str, novo_status: str):
     """Atualiza o status de um agendamento específico."""
@@ -279,10 +293,9 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
         print(f"ERRO AO ATUALIZAR HORÁRIO ({id_agendamento} para {novo_horario}): {e}", file=sys.stderr)
         return False
 
-# <-- FUNÇÃO COM LOGS ADICIONADOS -->
+# (Feature 4) Query modificada para buscar Pendente OU Confirmado
 def buscar_agendamentos_futuros_por_cliente(clinic_id: str, cliente_id: str):
-    """Busca agendamentos futuros (Confirmados) para um cliente específico usando seu ID."""
-    # Log 1: Parâmetros recebidos
+    """Busca agendamentos futuros (Pendentes ou Confirmados) para um cliente usando seu ID."""
     print(f"LOG: Iniciando buscar_agendamentos_futuros_por_cliente. clinic_id='{clinic_id}', cliente_id='{cliente_id}'", file=sys.stderr)
 
     if not cliente_id:
@@ -292,16 +305,16 @@ def buscar_agendamentos_futuros_por_cliente(clinic_id: str, cliente_id: str):
     try:
         hoje_sp = datetime.now(TZ_SAO_PAULO).date()
         inicio_do_dia_hoje = datetime.combine(hoje_sp, time.min, tzinfo=TZ_SAO_PAULO)
-        print(f"LOG: Data/hora de início para busca: {inicio_do_dia_hoje}", file=sys.stderr) # Log 2: Data de início
+        print(f"LOG: Data/hora de início para busca: {inicio_do_dia_hoje}", file=sys.stderr)
 
-        # Log 3: Detalhes da Query
-        print(f"LOG: Executando query: collection='agendamentos', where clinic_id=='{clinic_id}', cliente_id=='{cliente_id}', status=='Confirmado', horario>='{inicio_do_dia_hoje}'", file=sys.stderr)
+        # (Feature 4) Query modificada para usar 'in'
+        print(f"LOG: Executando query: collection='agendamentos', where clinic_id=='{clinic_id}', cliente_id=='{cliente_id}', status in ['Pendente', 'Confirmado'], horario>='{inicio_do_dia_hoje}'", file=sys.stderr)
         query = db.collection('agendamentos') \
-                  .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                  .where(filter=FieldFilter('cliente_id', '==', cliente_id)) \
-                  .where(filter=FieldFilter('status', '==', 'Confirmado')) \
-                  .where(filter=FieldFilter('horario', '>=', inicio_do_dia_hoje))
-
+            .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+            .where(filter=FieldFilter('cliente_id', '==', cliente_id)) \
+            .where(filter=FieldFilter('status', 'in', ['Pendente', 'Confirmado'])) \
+            .where(filter=FieldFilter('horario', '>=', inicio_do_dia_hoje))
+        
         docs = query.stream()
         agendamentos = []
         count_docs_encontrados = 0
@@ -310,30 +323,83 @@ def buscar_agendamentos_futuros_por_cliente(clinic_id: str, cliente_id: str):
             data = doc.to_dict()
             data['id'] = doc.id
             if 'horario' in data and isinstance(data['horario'], datetime):
-                 data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
-                 agendamentos.append(data)
+                data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
+                agendamentos.append(data)
             else:
-                 print(f"WARN: Agendamento ID {doc.id} encontrado mas sem 'horario' válido. Ignorado.", file=sys.stderr)
-
-
-        # Log 4: Resultado da Query
+                print(f"WARN: Agendamento ID {doc.id} encontrado mas sem 'horario' válido. Ignorado.", file=sys.stderr)
+        
         print(f"LOG: Query retornou {count_docs_encontrados} documentos.", file=sys.stderr)
-
-        # Ordena em Python
-        agendamentos.sort(key=lambda x: x.get('horario', datetime.min.replace(tzinfo=TZ_SAO_PAULO))) # Adiciona fallback para horário
-
-        # Log 5: Resultado Final
+        agendamentos.sort(key=lambda x: x.get('horario', datetime.min.replace(tzinfo=TZ_SAO_PAULO)))
         print(f"LOG: Retornando {len(agendamentos)} agendamentos futuros para cliente_id='{cliente_id}'.", file=sys.stderr)
         return agendamentos
-
+    
     except Exception as e:
-        # Log 6: Erro
         print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS DO CLIENTE (por ID='{cliente_id}'): {e}", file=sys.stderr)
-        # Considerar logar o traceback completo se o erro persistir
-        # import traceback
-        # print(traceback.format_exc(), file=sys.stderr)
         return []
-# <-- FIM DA FUNÇÃO COM LOGS -->
+
+# --- (Feature 2c) Nova Função ---
+def buscar_agendamentos_futuros_por_profissional(clinic_id: str, profissional_nome: str):
+    """Busca agendamentos futuros ('Confirmado' ou 'Pendente') para um profissional específico."""
+    try:
+        hoje_inicio_dia = datetime.combine(datetime.now(TZ_SAO_PAULO).date(), time.min, tzinfo=TZ_SAO_PAULO)
+
+        query = db.collection('agendamentos') \
+            .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+            .where(filter=FieldFilter('profissional_nome', '==', profissional_nome)) \
+            .where(filter=FieldFilter('status', 'in', ['Confirmado', 'Pendente'])) \
+            .where(filter=FieldFilter('horario', '>=', hoje_inicio_dia))
+        
+        docs = query.stream()
+        agendamentos = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            agendamentos.append(data)
+            
+        print(f"LOG: Encontrados {len(agendamentos)} agendamentos futuros para {profissional_nome}.", file=sys.stderr)
+        return agendamentos
+    except Exception as e:
+        print(f"ERRO AO BUSCAR AGENDAMENTOS FUTUROS POR PROFISSIONAL ({profissional_nome}): {e}", file=sys.stderr)
+        return []
+
+# --- (Feature 2c) Nova Função ---
+def desassociar_profissional_agendamento(id_agendamento: str):
+    """Define o profissional_nome de um agendamento como '[Sem Profissional]'."""
+    try:
+        doc_ref = db.collection('agendamentos').document(id_agendamento)
+        doc_ref.update({'profissional_nome': '[Sem Profissional]'}) # Usar um placeholder é melhor que None
+        return True
+    except Exception as e:
+        print(f"ERRO AO DESASSOCIAR PROFISSIONAL (AG_ID: {id_agendamento}): {e}", file=sys.stderr)
+        return False
+
+# --- (Feature 2c) Nova Função ---
+def buscar_agendamentos_sem_profissional(clinic_id: str):
+    """Busca agendamentos futuros ('Confirmado' ou 'Pendente') marcados como '[Sem Profissional]'."""
+    try:
+        hoje_inicio_dia = datetime.combine(datetime.now(TZ_SAO_PAULO).date(), time.min, tzinfo=TZ_SAO_PAULO)
+
+        query = db.collection('agendamentos') \
+            .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+            .where(filter=FieldFilter('profissional_nome', '==', '[Sem Profissional]')) \
+            .where(filter=FieldFilter('status', 'in', ['Confirmado', 'Pendente'])) \
+            .where(filter=FieldFilter('horario', '>=', hoje_inicio_dia))
+        
+        docs = query.stream()
+        agendamentos = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            if 'horario' in data and isinstance(data['horario'], datetime):
+                 data['horario'] = data['horario'].astimezone(TZ_SAO_PAULO)
+            agendamentos.append(data)
+            
+        print(f"LOG: Encontrados {len(agendamentos)} agendamentos sem profissional.", file=sys.stderr)
+        return sorted(agendamentos, key=lambda x: x.get('horario', datetime.max.replace(tzinfo=TZ_SAO_PAULO)))
+    except Exception as e:
+        print(f"ERRO AO BUSCAR AGENDAMENTOS SEM PROFISSIONAL: {e}", file=sys.stderr)
+        return []
+
 
 # --- Funções de Gestão de Feriados ---
 def adicionar_feriado(clinic_id: str, data_feriado: date, descricao: str):
@@ -367,7 +433,6 @@ def listar_feriados(clinic_id: str):
         print(f"Erro ao listar feriados: {e}", file=sys.stderr)
         return []
 
-
 def remover_feriado(clinic_id: str, feriado_id: str):
     """Remove um feriado de uma clínica."""
     try:
@@ -397,15 +462,16 @@ def adicionar_cliente(clinic_id: str, nome: str, telefone: str, observacoes: str
     """Adiciona um novo cliente a uma clínica e retorna o ID."""
     try:
         clientes_ref = db.collection('clinicas').document(clinic_id).collection('clientes')
+        
         # Verifica se já existe um cliente com o mesmo nome ou telefone (opcional, mas bom)
         query_nome = clientes_ref.where(filter=FieldFilter('nome', '==', nome)).limit(1).stream()
         query_tel = clientes_ref.where(filter=FieldFilter('telefone', '==', telefone)).limit(1).stream()
         if any(query_nome) or any(query_tel):
-             print(f"WARN: Tentativa de adicionar cliente duplicado (Nome ou Tel): {nome} / {telefone}", file=sys.stderr)
-             # Você pode retornar False ou o ID do existente se encontrar
-             # Por ora, vamos permitir, mas logamos
-             pass # Permite adicionar mesmo assim
-
+            print(f"WARN: Tentativa de adicionar cliente duplicado (Nome ou Tel): {nome} / {telefone}", file=sys.stderr)
+            # Você pode retornar False ou o ID do existente se encontrar
+            # Por ora, vamos permitir, mas logamos
+            pass # Permite adicionar mesmo assim
+            
         doc_ref = clientes_ref.add({'nome': nome, 'telefone': telefone, 'observacoes': observacoes})
         # doc_ref é uma tupla (timestamp, document_reference)
         # O ID está em doc_ref[1].id
@@ -415,7 +481,6 @@ def adicionar_cliente(clinic_id: str, nome: str, telefone: str, observacoes: str
     except Exception as e:
         print(f"ERRO AO ADICIONAR CLIENTE '{nome}': {e}", file=sys.stderr)
         return False, None # Retorna falha e None para ID
-
 
 def remover_cliente(clinic_id: str, cliente_id: str):
     """Remove um cliente de uma clínica."""
@@ -480,10 +545,11 @@ def listar_turmas(clinic_id: str, profissionais_list: list = None, servicos_list
         turmas_ref = db.collection('clinicas').document(clinic_id).collection('turmas')
         docs = turmas_ref.order_by('horario').stream() # Assume que 'horario' é string HH:MM
         turmas = []
+        
         for doc in docs:
             turma = doc.to_dict()
             turma['id'] = doc.id
-
+            
             if profissionais_list:
                 prof_id = turma.get('profissional_id')
                 prof_info = next((p for p in profissionais_list if p['id'] == prof_id), None)
@@ -493,13 +559,12 @@ def listar_turmas(clinic_id: str, profissionais_list: list = None, servicos_list
                 serv_id = turma.get('servico_id')
                 serv_info = next((s for s in servicos_list if s['id'] == serv_id), None)
                 turma['servico_nome'] = serv_info['nome'] if serv_info else 'Serviço Removido'
-
+                
             turmas.append(turma)
         return turmas
     except Exception as e:
         print(f"ERRO AO LISTAR TURMAS: {e}", file=sys.stderr)
         return []
-
 
 def remover_turma(clinic_id: str, turma_id: str):
     """Remove uma turma da clínica."""
@@ -522,23 +587,63 @@ def atualizar_turma(clinic_id: str, turma_id: str, dados_turma: dict):
         return False
 
 def contar_agendamentos_turma_dia(clinic_id: str, turma_id: str, data: date):
-    """Conta quantos agendamentos confirmados existem para uma turma específica em um dia."""
+    """Conta quantos agendamentos ('Confirmado' ou 'Pendente') existem para uma turma em um dia."""
     try:
         start_dt = datetime.combine(data, time.min, tzinfo=TZ_SAO_PAULO)
         end_dt = datetime.combine(data, time.max, tzinfo=TZ_SAO_PAULO)
 
         query = db.collection('agendamentos').where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
-                                             .where(filter=FieldFilter('turma_id', '==', turma_id)) \
-                                             .where(filter=FieldFilter('status', '==', 'Confirmado')) \
-                                             .where(filter=FieldFilter('horario', '>=', start_dt)) \
-                                             .where(filter=FieldFilter('horario', '<=', end_dt))
-
+                                        .where(filter=FieldFilter('turma_id', '==', turma_id)) \
+                                        .where(filter=FieldFilter('status', 'in', ['Confirmado', 'Pendente'])) \
+                                        .where(filter=FieldFilter('horario', '>=', start_dt)) \
+                                        .where(filter=FieldFilter('horario', '<=', end_dt))
+        
         # Firestore não tem count() eficiente em todas as SDKs, iterar é a forma garantida
         count = sum(1 for _ in query.stream())
         return count
     except Exception as e:
         print(f"ERRO AO CONTAR AGENDAMENTOS DA TURMA (ID: {turma_id}, Data: {data}): {e}", file=sys.stderr)
         return 0
+
+# --- (Feature 1) Nova Função ---
+def verificar_cliente_ja_na_turma(clinic_id: str, cliente_id: str, turma_id: str, data: date):
+    """Verifica se um cliente específico já está agendado (Confirmado ou Pendente) para uma turma em um dia."""
+    if not cliente_id or not turma_id:
+        return False # Não pode verificar sem os IDs
+    try:
+        start_dt = datetime.combine(data, time.min, tzinfo=TZ_SAO_PAULO)
+        end_dt = datetime.combine(data, time.max, tzinfo=TZ_SAO_PAULO)
+
+        query = db.collection('agendamentos') \
+            .where(filter=FieldFilter('clinic_id', '==', clinic_id)) \
+            .where(filter=FieldFilter('turma_id', '==', turma_id)) \
+            .where(filter=FieldFilter('cliente_id', '==', cliente_id)) \
+            .where(filter=FieldFilter('status', 'in', ['Confirmado', 'Pendente'])) \
+            .where(filter=FieldFilter('horario', '>=', start_dt)) \
+            .where(filter=FieldFilter('horario', '<=', end_dt)) \
+            .limit(1)
+
+        docs = query.stream()
+        if any(docs):
+            print(f"LOG: Cliente {cliente_id} JÁ ESTÁ na turma {turma_id} no dia {data}.", file=sys.stderr)
+            return True # Cliente já agendado
+        return False
+
+    except Exception as e:
+        print(f"ERRO AO VERIFICAR CLIENTE NA TURMA (ID: {turma_id}, Cliente: {cliente_id}, Data: {data}): {e}", file=sys.stderr)
+        return False # Em caso de erro, não bloqueia
+
+
+# --- (Feature 2a) Nova Função ---
+def atualizar_profissional_agendamento(id_agendamento: str, novo_profissional_nome: str):
+    """Atualiza o profissional de um agendamento específico."""
+    try:
+        doc_ref = db.collection('agendamentos').document(id_agendamento)
+        doc_ref.update({'profissional_nome': novo_profissional_nome})
+        return True
+    except Exception as e:
+        print(f"ERRO AO ATUALIZAR PROFISSIONAL ({id_agendamento} para {novo_profissional_nome}): {e}", file=sys.stderr)
+        return False
 
 
 # --- NOVAS FUNÇÕES - Gestão de Pacotes ---
@@ -579,7 +684,6 @@ def remover_pacote_modelo(clinic_id: str, pacote_id: str):
         print(f"ERRO AO REMOVER MODELO DE PACOTE (ID: {pacote_id}): {e}", file=sys.stderr)
         return False
 
-
 # 2. Funções para Pacotes dos Clientes (Instâncias individuais)
 def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
     """Lista todos os pacotes adquiridos por um cliente específico."""
@@ -590,10 +694,12 @@ def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
 
         # Ordena pela data de expiração mais recente primeiro
         docs = pacotes_ref.order_by('data_expiracao', direction=firestore.Query.DESCENDING).stream()
+        
         pacotes = []
         for doc in docs:
             pacote = doc.to_dict()
             pacote['id'] = doc.id
+            
             # Converte timestamps Firestore para datetimes Python com timezone
             if 'data_inicio' in pacote and isinstance(pacote['data_inicio'], datetime):
                 pacote['data_inicio'] = pacote['data_inicio'].astimezone(TZ_SAO_PAULO)
@@ -604,6 +710,30 @@ def listar_pacotes_do_cliente(clinic_id: str, cliente_id: str):
     except Exception as e:
         print(f"ERRO AO LISTAR PACOTES DO CLIENTE (ID: {cliente_id}): {e}", file=sys.stderr)
         return []
+
+# --- (Feature 3) Nova Função ---
+def get_pacote_cliente_by_id(clinic_id: str, cliente_id: str, pacote_cliente_id: str):
+    """Busca um pacote específico de um cliente pelo ID."""
+    if not cliente_id or not pacote_cliente_id:
+        return None
+    try:
+        pacote_ref = db.collection('clinicas').document(clinic_id) \
+            .collection('clientes').document(cliente_id) \
+            .collection('pacotes_clientes').document(pacote_cliente_id)
+        doc = pacote_ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            # Converter timestamps
+            if 'data_inicio' in data and isinstance(data['data_inicio'], datetime):
+                data['data_inicio'] = data['data_inicio'].astimezone(TZ_SAO_PAULO)
+            if 'data_expiracao' in data and isinstance(data['data_expiracao'], datetime):
+                data['data_expiracao'] = data['data_expiracao'].astimezone(TZ_SAO_PAULO)
+            return data
+        return None
+    except Exception as e:
+        print(f"ERRO AO BUSCAR PACOTE CLIENTE POR ID (Cliente: {cliente_id}, Pacote: {pacote_cliente_id}): {e}", file=sys.stderr)
+        return None
+
 
 def associar_pacote_ao_cliente(clinic_id: str, cliente_id: str, dados_pacote_cliente: dict):
     """Associa/vende um pacote a um cliente."""
@@ -620,13 +750,13 @@ def associar_pacote_ao_cliente(clinic_id: str, cliente_id: str, dados_pacote_cli
 def deduzir_credito_pacote_cliente(clinic_id: str, cliente_id: str, pacote_cliente_id: str):
     """Deduz 1 crédito de um pacote específico do cliente usando Increment."""
     if not cliente_id or not pacote_cliente_id:
-         print(f"ERRO: Tentativa de deduzir crédito com IDs inválidos. Cliente: '{cliente_id}', Pacote: '{pacote_cliente_id}'", file=sys.stderr)
-         return False
+        print(f"ERRO: Tentativa de deduzir crédito com IDs inválidos. Cliente: '{cliente_id}', Pacote: '{pacote_cliente_id}'", file=sys.stderr)
+        return False
     try:
         pacote_ref = db.collection('clinicas').document(clinic_id) \
-                       .collection('clientes').document(cliente_id) \
-                       .collection('pacotes_clientes').document(pacote_cliente_id)
-
+                        .collection('clientes').document(cliente_id) \
+                        .collection('pacotes_clientes').document(pacote_cliente_id)
+        
         # Usa firestore.Increment para uma dedução atômica e segura
         pacote_ref.update({
             'creditos_restantes': firestore.Increment(-1)
