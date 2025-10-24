@@ -4,6 +4,7 @@
 # 2. Nova função: buscar_pacotes_validos_cliente
 # 3. Nova função: associar_pacote_cliente
 # 4. [CORREÇÃO CRÍTICA] `gerar_turmas_disponiveis` agora passa o horário exato da turma para `contar_agendamentos_turma_dia`.
+# 5. [AJUSTE] Adicionado `agendamento_id_excluir` para garantir que a checagem de disponibilidade ignore o agendamento que está sendo remarcado/transferido.
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -11,6 +12,7 @@ import pandas as pd
 import random
 from zoneinfo import ZoneInfo
 import requests # Para buscar feriados
+import sys
 
 # Importações de funções de DB
 from database import (
@@ -38,7 +40,10 @@ def gerar_token_unico():
     return str(random.randint(100000, 999999))
 
 def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str, data_hora_inicio: datetime, duracao: int, agendamento_id_excluir: str = None):
-    """Verifica se um slot de tempo específico está disponível para agendamento INDIVIDUAL."""
+    """
+    Verifica se um slot de tempo específico está disponível para agendamento INDIVIDUAL.
+    Adicionado agendamento_id_excluir para ignorar o próprio agendamento (usado em remarcação/transferência).
+    """
     from database import buscar_agendamentos_por_data_e_profissional, listar_profissionais, listar_feriados
     
     profissionais = listar_profissionais(clinic_id)
@@ -75,14 +80,17 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
     
         return False, "O dia selecionado é um feriado ou folga."
 
+    # Busca agendamentos do profissional na data
     agendamentos_existentes = buscar_agendamentos_por_data_e_profissional(clinic_id, profissional_nome, data_hora_inicio.date())
     
     
     if agendamentos_existentes.empty or 'turma_id' not in agendamentos_existentes.columns:
         agendamentos_individuais = agendamentos_existentes.copy()
     else:
+        # Filtra apenas agendamentos individuais (sem turma_id)
         agendamentos_individuais = agendamentos_existentes[agendamentos_existentes['turma_id'].isnull()]
 
+    # Exclui o próprio agendamento se for uma operação de remarcação/transferência
     if agendamento_id_excluir and not agendamentos_individuais.empty:
         agendamentos_individuais = agendamentos_individuais[agendamentos_individuais['id'] != agendamento_id_excluir]
 
@@ -96,6 +104,7 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
                 duracao_existente = int(ag.get('duracao_min', 30))
                 dt_fim_existente = dt_inicio_existente + timedelta(minutes=duracao_existente)
                 
+                # Verifica sobreposição
                 if data_hora_inicio < dt_fim_existente and dt_inicio_existente < dt_fim_novo:
     
                     return False, f"Conflito com agendamento das {dt_inicio_existente.strftime('%H:%M')}."
