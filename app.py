@@ -10,6 +10,7 @@
 # 7. [BUGFIX] Adicionada importação de `sys` para corrigir `NameError` na função de log de duplicidade.
 # 8. [NOVA FEATURE] Adicionada função de troca de profissional para agendamentos individuais.
 # 9. [BUGFIX] Corrigido erro de digitação na variável `atendimentos_por_dia` no Dashboard (Gráfico de Linha).
+# 10. [REESTRUTURAÇÃO UX] Movida a navegação principal (`st.radio`) para a barra lateral (`st.sidebar`) para melhor organização do layout (como solicitado).
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -1089,10 +1090,25 @@ def render_backoffice_clinica():
     except Exception: # Captura erros de tipo ou comparação
         st.session_state.form_data_selecionada = date.today()
 
+    # --- Conteúdo da Sidebar ---
+    with st.sidebar:
+        st.header(f"Clínica: {st.session_state.clinic_name}")
+        if st.button("Sair"):
+            handle_logout()
 
-    st.sidebar.header(f"Clínica: {st.session_state.clinic_name}")
-    if st.sidebar.button("Sair"):
-        handle_logout()
+        st.markdown("---") # Divisor
+
+        # Define as abas disponíveis
+        tab_options = ["🗓️ Agenda e Agendamento", "📅 Gerenciar Turmas", "🛍️ Gerenciar Pacotes", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
+
+        # Renderiza o controle de navegação (radio) na sidebar (VERTICAL)
+        # O argumento horizontal=True foi removido, e label_visibility="collapsed" foi removido
+        active_tab = st.radio(
+            "Navegação",
+            tab_options,
+            key="active_tab", # Usa o estado da sessão para persistir a aba ativa
+            # Removido horizontal=True
+        )
 
     # Carrega dados essenciais uma vez por renderização
     profissionais_clinica = listar_profissionais(clinic_id)
@@ -1104,19 +1120,7 @@ def render_backoffice_clinica():
     # Lista de nomes de profissionais para o selectbox de troca
     profissionais_nomes = [p.get('nome','Prof. Inválido') for p in profissionais_clinica]
 
-    # Define as abas disponíveis
-    tab_options = ["🗓️ Agenda e Agendamento", "📅 Gerenciar Turmas", "🛍️ Gerenciar Pacotes", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
-
-    # Renderiza o controle de navegação (abas/radio)
-    active_tab = st.radio(
-        "Navegação",
-        tab_options,
-        key="active_tab", # Usa o estado da sessão para persistir a aba ativa
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-
-    # --- Renderização Condicional da Aba Ativa ---
+    # --- Renderização Condicional da Aba Ativa (CONTEÚDO PRINCIPAL) ---
 
     if active_tab == "🗓️ Agenda e Agendamento":
         st.header("📝 Agendamento Rápido e Manual")
