@@ -9,6 +9,7 @@
 # 6. [CORREÇÃO CRÍTICA] Importado `verificar_cliente_em_turma`.
 # 7. [BUGFIX] Adicionada importação de `sys` para corrigir `NameError` na função de log de duplicidade.
 # 8. [NOVA FEATURE] Adicionada função de troca de profissional para agendamentos individuais.
+# 9. [BUGFIX] Corrigido erro de digitação na variável `atendimentos_por_dia` no Dashboard (Gráfico de Linha).
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -1705,7 +1706,8 @@ def render_backoffice_clinica():
                     df_dashboard['data'] = df_dashboard['horario'].dt.date
                     # Agrupa por data e conta agendamentos
                     atendimentos_por_dia = df_dashboard.groupby('data').size().reset_index(name='contagem')
-                    atendimentos_por_dia = atendendimentos_por_dia.sort_values('data') # Ordena por data
+                    # CORREÇÃO DO ERRO DE DIGITAÇÃO:
+                    atendimentos_por_dia = atendimentos_por_dia.sort_values('data') # Ordena por data
                     # Cria e plota o gráfico de linha
                     fig_line = go.Figure(data=go.Scatter(x=atendimentos_por_dia['data'], y=atendimentos_por_dia['contagem'], mode='lines+markers'))
                     fig_line.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), xaxis_title="Data", yaxis_title="Nº de Atendimentos")
