@@ -3,6 +3,16 @@
 # 1. [SOLUÇÃO DEFINITIVA] `handle_agendamento_submission` agora passa `cliente_id` para `salvar_agendamento`.
 # 2. [SOLUÇÃO DEFINITIVA] Aba "Gerenciar Clientes" agora busca agendamentos futuros por `cliente_id`.
 # 3. [CORREÇÃO] Removido argumento 'key' inválido das chamadas st.popover na aba Gerenciar Clientes.
+# --- INÍCIO DAS NOVAS ATUALIZAÇÕES ---
+# 4. (Feature 1) `handle_agendamento_submission` agora chama `verificar_cliente_ja_na_turma`.
+# 5. (Feature 4) `render_agendamento_seguro` reescrito para incluir o fluxo "Pendente" -> "Confirmar".
+# 6. (Feature 2a) Adicionado botão 🔁 (Trocar Profissional) nas listas de agendamento.
+# 7. (Feature 2a) Adicionada função `handle_trocar_profissional_agendamento`.
+# 8. (Feature 2c) `handle_remove_profissional` modificado para chamar `processar_desligamento_profissional`.
+# 9. (Feature 2c) "Agenda e Agendamento" agora exibe "Agendamentos Sem Profissional".
+# 10. (Feature 3) Mensagens de WhatsApp agora incluem detalhes de pacotes.
+# 11. (Feature 5) "Visão Diária" agora inclui `render_resumo_dia`.
+# --- FIM DAS NOVAS ATUALIZAÇÕES ---
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -10,6 +20,7 @@ import pandas as pd
 from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 import numpy as np
+import sys # Para logs
 
 # IMPORTAÇÕES CORRIGIDAS E ADICIONADAS PARA O NOVO MODELO
 from database import (
@@ -46,7 +57,13 @@ from database import (
     listar_pacotes_do_cliente,
     deduzir_credito_pacote_cliente,
     # Função de agendamentos futuros modificada para usar cliente_id
-    buscar_agendamentos_futuros_por_cliente
+    buscar_agendamentos_futuros_por_cliente,
+    # --- NOVAS IMPORTAÇÕES (Features 1, 2, 3, 5) ---
+    verificar_cliente_ja_na_turma, # (Feature 1)
+    atualizar_profissional_agendamento, # (Feature 2a)
+    buscar_agendamentos_sem_profissional, # (Feature 2c)
+    get_pacote_cliente_by_id, # (Feature 3)
+    buscar_agendamentos_por_intervalo # (Feature 5) - Importação movida/confirmada
 )
 from logica_negocio import (
     gerar_token_unico,
@@ -64,14 +81,16 @@ from logica_negocio import (
     gerar_visao_comparativa,
     # Funções de Pacotes (LÓGICA)
     buscar_pacotes_validos_cliente,
-    associar_pacote_cliente
+    associar_pacote_cliente,
+    # --- NOVA IMPORTAÇÃO (Feature 2c) ---
+    processar_desligamento_profissional
 )
 
 # --- Configuração ---
 st.set_page_config(layout="wide", page_title="Agenda Fit - Agendamento Inteligente")
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
 DIAS_SEMANA = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta",
-                "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
+              "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
 DIAS_SEMANA_MAP_REV = {v: k for k, v in DIAS_SEMANA.items()}
 DIAS_SEMANA_LISTA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
 
@@ -129,6 +148,10 @@ if 'remarcacao_cliente_form_data' not in st.session_state:
     st.session_state.remarcacao_cliente_form_data = {}
 if 'remarcacao_cliente_form_hora' not in st.session_state:
     st.session_state.remarcacao_cliente_form_hora = {}
+    
+# (Feature 2a) State para Troca de Profissional
+if 'troca_prof_status' not in st.session_state:
+    st.session_state.troca_prof_status = {}
 
 
 # --- FUNÇÕES DE LÓGICA DA UI (HANDLERS) ---
@@ -167,11 +190,12 @@ def handle_login():
 def handle_logout():
     """Limpa a sessão e desloga o usuário."""
     keys_to_clear = ['clinic_id', 'clinic_name', 'editando_horario_id',
-                     'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento',
-                     'detalhes_agendamento', 'form_data_selecionada', 'filter_data_selecionada',
-                     'is_super_admin', 'agenda_cliente_id_selecionado', 'pacotes_validos_cliente',
-                     'pacote_status_placeholder', 'remarcando_cliente_ag_id', 'remarcacao_cliente_status',
-                     'remarcacao_cliente_form_data', 'remarcacao_cliente_form_hora']
+                   'active_tab', 'agenda_cliente_select', 'c_tel_input', 'confirmando_agendamento',
+                   'detalhes_agendamento', 'form_data_selecionada', 'filter_data_selecionada',
+                   'is_super_admin', 'agenda_cliente_id_selecionado', 'pacotes_validos_cliente',
+                   'pacote_status_placeholder', 'remarcando_cliente_ag_id', 'remarcacao_cliente_status',
+                   'remarcacao_cliente_form_data', 'remarcacao_cliente_form_hora',
+                   'troca_prof_status'] # (Feature 2a) Limpa status de troca
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
@@ -259,7 +283,7 @@ def handle_verificar_pacotes():
         try:
             placeholder.empty()
         except Exception as e:
-             print(f"Erro ao limpar placeholder (sem cliente/serviço): {e}") # Log erro
+            print(f"Erro ao limpar placeholder (sem cliente/serviço): {e}") # Log erro
         return
 
     # Busca pacotes válidos se tiver cliente e serviço
@@ -276,14 +300,14 @@ def handle_verificar_pacotes():
             pacote = pacotes_validos[0] # Pega o primeiro pacote válido
             expiracao_str = "Data Inválida"
             if isinstance(pacote.get('data_expiracao'), datetime):
-                 expiracao_str = pacote['data_expiracao'].strftime('%d/%m/%Y')
+                expiracao_str = pacote['data_expiracao'].strftime('%d/%m/%Y')
 
             msg = f"ℹ️ Cliente possui Pacote '{pacote.get('nome_pacote','N/A')}' com {pacote.get('creditos_restantes','N/A')}/{pacote.get('creditos_total','N/A')} créditos (válido até {expiracao_str})."
 
             try:
                 placeholder.info(msg)
             except Exception as e:
-                 print(f"Erro ao atualizar placeholder (com pacote): {e}") # Log erro
+                print(f"Erro ao atualizar placeholder (com pacote): {e}") # Log erro
         else:
             try:
                 placeholder.empty() # Limpa se não encontrar pacotes
@@ -380,28 +404,47 @@ def handle_agendamento_submission():
     dt_consulta_naive = datetime.combine(detalhes['data'], detalhes['hora'])
     dt_consulta_local = dt_consulta_naive.replace(tzinfo=TZ_SAO_PAULO)
 
+    # --- (Feature 1) Bloco de Verificação de Cliente em Turma ---
+    cliente_id_para_salvar = detalhes.get('cliente_id')
+    # Se for cliente novo, cria primeiro para obter o ID
+    if detalhes['cliente_era_novo']:
+        adicionado, novo_cliente_id = adicionar_cliente(clinic_id, detalhes['cliente'], detalhes['telefone'], "")
+        if adicionado and novo_cliente_id:
+            cliente_id_para_salvar = novo_cliente_id
+            print(f"Novo cliente '{detalhes['cliente']}' criado com ID: {cliente_id_para_salvar}", file=sys.stderr)
+        else:
+            print(f"ERRO: Falha ao adicionar novo cliente '{detalhes['cliente']}' ou obter seu ID.", file=sys.stderr)
+            st.error("Falha ao adicionar novo cliente.")
+            cliente_id_para_salvar = None # Garante que é None se falhou
+    
+    if detalhes['turma_id'] and cliente_id_para_salvar:
+        ja_agendado = verificar_cliente_ja_na_turma(
+            clinic_id,
+            cliente_id_para_salvar,
+            detalhes['turma_id'],
+            detalhes['data'] # Passa a data do agendamento
+        )
+        if ja_agendado:
+            st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'status': "Este cliente já está agendado para esta turma neste dia."}
+            # Reset state
+            st.session_state.confirmando_agendamento = False
+            st.session_state.detalhes_agendamento = {}
+            st.rerun()
+            return # PARA a execução
+    # --- (Feature 1) Fim do Bloco de Verificação ---
+
+
     disponivel = True
     msg_disponibilidade = ""
+    # Só verifica disponibilidade do profissional se NÃO for turma
     if not detalhes['turma_id']:
         disponivel, msg_disponibilidade = verificar_disponibilidade_com_duracao(clinic_id, detalhes['profissional'], dt_consulta_local, duracao_servico)
 
     if disponivel:
         pin_code = gerar_token_unico()
-        cliente_id_para_salvar = detalhes.get('cliente_id') # ID do cliente (pode ser None se for novo)
-
-        # Se for cliente novo, cria primeiro para obter o ID
-        if detalhes['cliente_era_novo']:
-            adicionado, novo_cliente_id = adicionar_cliente(clinic_id, detalhes['cliente'], detalhes['telefone'], "")
-            if adicionado and novo_cliente_id:
-                 cliente_id_para_salvar = novo_cliente_id
-                 print(f"Novo cliente '{detalhes['cliente']}' criado com ID: {cliente_id_para_salvar}")
-            else:
-                 print(f"ERRO: Falha ao adicionar novo cliente '{detalhes['cliente']}' ou obter seu ID.")
-                 st.error("Falha ao adicionar novo cliente.")
-                 # Decide se quer prosseguir sem o ID ou parar
-                 cliente_id_para_salvar = None # Garante que é None se falhou
-
-
+        
+        # ID do cliente já foi obtido acima no bloco da Feature 1
+        
         dados = {
             'profissional_nome': detalhes['profissional'],
             'cliente': detalhes['cliente'],
@@ -425,17 +468,16 @@ def handle_agendamento_submission():
                         detalhes['pacote_cliente_id']
                     )
                     if deduzido:
-                        print(f"Crédito deduzido do pacote {detalhes['pacote_cliente_id']} para cliente {cliente_id_para_salvar}")
+                        print(f"Crédito deduzido do pacote {detalhes['pacote_cliente_id']} para cliente {cliente_id_para_salvar}", file=sys.stderr)
                     else:
-                         print(f"Falha ao deduzir crédito do pacote {detalhes['pacote_cliente_id']} para cliente {cliente_id_para_salvar}")
-                         st.warning("Agendamento salvo, mas falha ao deduzir o crédito do pacote.")
+                        print(f"Falha ao deduzir crédito do pacote {detalhes['pacote_cliente_id']} para cliente {cliente_id_para_salvar}", file=sys.stderr)
+                        st.warning("Agendamento salvo, mas falha ao deduzir o crédito do pacote.")
                 except Exception as e:
-                    print(f"ERRO AO DEDUZIR CRÉDITO (mas agendamento salvo): {e}")
+                    print(f"ERRO AO DEDUZIR CRÉDITO (mas agendamento salvo): {e}", file=sys.stderr)
                     st.warning(f"Agendamento salvo, mas ocorreu um erro ao deduzir o crédito: {e}")
             elif detalhes.get('pacote_cliente_id') and not cliente_id_para_salvar:
-                 print("AVISO: Pacote selecionado, mas ID do cliente não disponível para dedução (pode ser novo cliente não encontrado).")
-                 st.warning("Agendamento salvo, mas o crédito do pacote não pôde ser deduzido automaticamente.")
-
+                print("AVISO: Pacote selecionado, mas ID do cliente não disponível para dedução (pode ser novo cliente não encontrado).", file=sys.stderr)
+                st.warning("Agendamento salvo, mas o crédito do pacote não pôde ser deduzido automaticamente.")
 
             link_gestao = f"https://agendafit.streamlit.app?pin={pin_code}"
             st.session_state.last_agendamento_info = {'cliente': detalhes['cliente'], 'link_gestao': link_gestao, 'pin_code': pin_code, 'status': True}
@@ -517,6 +559,8 @@ def handle_remarcar_confirmacao(pin, agendamento_id, profissional_nome):
     st.session_state.remarcacao_status = {'sucesso': sucesso, 'mensagem': mensagem}
     if sucesso:
         st.session_state.remarcando = False # Sai do modo remarcação na página PIN
+        # (Feature 4) Se remarcou, o status deve ser 'Confirmado' (caso estivesse 'Pendente')
+        acao_admin_agendamento(agendamento_id, "confirmar_cliente") # Confirma automaticamente ao remarcar
 
 def handle_cancelar_selecionados():
     ids_para_cancelar = [ag_id for ag_id, selecionado in st.session_state.agendamentos_selecionados.items() if selecionado]
@@ -540,7 +584,7 @@ def handle_cancelar_selecionados():
     st.rerun()
 
 def handle_admin_action(id_agendamento: str, acao: str):
-    """Handler genérico para ações de admin (cancelar, finalizar, no-show)"""
+    """Handler genérico para ações de admin (cancelar, finalizar, no-show, confirmar_cliente)"""
     if not id_agendamento:
         st.error("Erro interno: ID do agendamento não fornecido para a ação.")
         return
@@ -549,7 +593,7 @@ def handle_admin_action(id_agendamento: str, acao: str):
         st.success(f"Ação '{acao.upper()}' registrada com sucesso!")
         # Se estava remarcando este agendamento na tela do cliente, cancela a remarcação
         if st.session_state.remarcando_cliente_ag_id == id_agendamento:
-             handle_cancelar_remarcacao_cliente(id_agendamento)
+            handle_cancelar_remarcacao_cliente(id_agendamento)
         st.rerun() # Atualiza a UI
     else:
         st.error("Falha ao registrar a ação no sistema.")
@@ -584,6 +628,7 @@ def handle_add_servico():
     nome = st.session_state.nome_novo_servico.strip()
     duracao = st.session_state.duracao_novo_servico
     tipo = st.session_state.tipo_novo_servico
+    
     if nome and duracao > 0:
         if adicionar_servico(st.session_state.clinic_id, nome, duracao, tipo):
             st.success(f"Serviço '{nome}' adicionado com sucesso!")
@@ -656,12 +701,23 @@ def handle_update_turma(turma_id: str):
     else:
         st.error("Ocorreu um erro ao atualizar a turma.")
 
-def handle_remove_profissional(clinic_id: str, prof_id: str):
-    if db_remover_profissional(clinic_id, prof_id):
-        st.success("Profissional removido com sucesso!")
+# (Feature 2c) Handler de remoção modificado
+def handle_remove_profissional(clinic_id: str, prof_id: str, prof_nome: str):
+    """
+    Inicia o processo de desligamento, que desassocia agendamentos futuros
+    e depois remove o profissional.
+    """
+    if not prof_nome:
+        st.error("Erro interno: Nome do profissional não encontrado para o desligamento.")
+        return
+
+    sucesso, msg = processar_desligamento_profissional(clinic_id, prof_id, prof_nome)
+    
+    if sucesso:
+        st.success(msg)
         st.rerun()
     else:
-        st.error("Erro ao remover profissional. Verifique os logs.")
+        st.error(f"Erro no processo de desligamento: {msg}")
 
 def handle_remove_cliente(clinic_id: str, cliente_id: str):
     if db_remover_cliente(clinic_id, cliente_id):
@@ -690,6 +746,59 @@ def handle_remove_turma(clinic_id: str, turma_id: str):
         st.rerun()
     else:
         st.error("Erro ao remover turma. Verifique os logs.")
+
+# (Feature 2a) Novo handler para trocar profissional
+def handle_trocar_profissional_agendamento(agendamento_dict: dict):
+    """
+    Processa a troca de profissional para um agendamento específico.
+    Verifica a disponibilidade do novo profissional.
+    """
+    ag_id = agendamento_dict.get('id')
+    if not ag_id:
+        st.error("Erro interno: ID do agendamento não encontrado.")
+        return
+
+    novo_prof_nome = st.session_state.get(f"swap_prof_select_{ag_id}")
+    if not novo_prof_nome:
+        st.warning("Nenhum profissional selecionado para a troca.")
+        return
+
+    clinic_id = agendamento_dict.get('clinic_id')
+    horario_ag = agendamento_dict.get('horario')
+    duracao_ag = agendamento_dict.get('duracao_min', 30)
+    
+    # Garante que o horário é um datetime com timezone
+    if not isinstance(horario_ag, datetime):
+        st.error("Erro: Dados do agendamento inválidos (horário).")
+        return
+    if not horario_ag.tzinfo:
+         horario_ag = horario_ag.replace(tzinfo=TZ_SAO_PAULO) # Assume SP se faltar
+
+    # 1. Verificar disponibilidade do NOVO profissional
+    disponivel, msg = verificar_disponibilidade_com_duracao(
+        clinic_id,
+        novo_prof_nome,
+        horario_ag,
+        duracao_ag
+        # Não precisa excluir o agendamento_id, pois é de outro profissional
+    )
+
+    if not disponivel:
+        st.session_state.troca_prof_status[ag_id] = {'sucesso': False, 'mensagem': f"Erro: {msg}"}
+        st.rerun()
+        return
+
+    # 2. Se disponível, atualizar o agendamento
+    if atualizar_profissional_agendamento(ag_id, novo_prof_nome):
+        st.session_state.troca_prof_status[ag_id] = {'sucesso': True, 'mensagem': f"Profissional alterado para {novo_prof_nome}!"}
+        # Limpa o select
+        if f"swap_prof_select_{ag_id}" in st.session_state:
+            del st.session_state[f"swap_prof_select_{ag_id}"]
+        st.rerun()
+    else:
+        st.session_state.troca_prof_status[ag_id] = {'sucesso': False, 'mensagem': "Erro ao salvar a alteração no banco de dados."}
+        st.rerun()
+
 
 # Handlers para Pacotes
 
@@ -806,9 +915,9 @@ def handle_confirmar_remarcacao_cliente(agendamento: dict):
 
     # Verifica se os dados necessários estão presentes
     if not all([clinic_id, profissional_nome, duracao]):
-         st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': False, 'mensagem': "Erro interno: Dados do agendamento incompletos."}
-         st.rerun()
-         return
+        st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': False, 'mensagem': "Erro interno: Dados do agendamento incompletos."}
+        st.rerun()
+        return
 
     # Verifica disponibilidade
     disponivel, msg = verificar_disponibilidade_com_duracao(
@@ -824,7 +933,10 @@ def handle_confirmar_remarcacao_cliente(agendamento: dict):
     else:
         # Tenta atualizar no banco de dados
         if atualizar_horario_agendamento(ag_id, novo_horario_local):
-            st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': True, 'mensagem': "Remarcado com sucesso!"}
+            # (Feature 4) Confirma automaticamente o agendamento ao remarcar
+            acao_admin_agendamento(ag_id, "confirmar_cliente")
+            
+            st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': True, 'mensagem': "Remarcado e Confirmado com sucesso!"}
             st.session_state.remarcando_cliente_ag_id = None # Esconde o formulário
         else:
             st.session_state.remarcacao_cliente_status[ag_id] = {'sucesso': False, 'mensagem': "Erro ao salvar no banco de dados."}
@@ -842,11 +954,14 @@ def render_login_page():
         st.text_input("Senha", type="password", key="login_password")
         st.form_submit_button("Entrar", on_click=handle_login)
 
+# (Feature 4) Página de gestão do cliente totalmente refeita
 def render_agendamento_seguro():
     st.title("🔒 Gestão do seu Agendamento")
-    if st.session_state.get('remarcacao_status'): # Usar get para segurança
+
+    # Exibe mensagens de status (sucesso/erro) de ações anteriores
+    if st.session_state.get('remarcacao_status'):
         status = st.session_state.remarcacao_status
-        if status.get('sucesso'): # Usar get
+        if status.get('sucesso'):
             st.success(status.get('mensagem','Operação bem sucedida.'))
         else:
             st.error(status.get('mensagem','Ocorreu um erro.'))
@@ -855,95 +970,150 @@ def render_agendamento_seguro():
     pin = st.query_params.get("pin")
     if not pin:
         st.error("Link inválido ou PIN não fornecido.")
-        # st.page_link("app.py", label="Voltar ao Login") # Opção de voltar
         return
 
     agendamento = buscar_agendamento_por_pin(pin)
     if not agendamento:
         st.error("PIN de agendamento inválido ou expirado.")
-        # st.page_link("app.py", label="Voltar ao Login")
         return
 
     ag_id = agendamento.get('id')
     horario_ag = agendamento.get('horario')
     horario_str = horario_ag.strftime('%d/%m/%Y às %H:%M') if isinstance(horario_ag, datetime) else "Data/Hora Inválida"
     status_atual = agendamento.get('status', 'Status Desconhecido')
+    profissional_nome = agendamento.get('profissional_nome','N/A')
 
-    # Se for turma, só mostra info e sai
+    # Se for turma, só mostra info e sai (lógica mantida)
     if agendamento.get('turma_id'):
-        st.info(f"Seu agendamento de turma com **{agendamento.get('profissional_nome','N/A')}** para **{horario_str}** está com status: **{status_atual}**.")
+        st.info(f"Seu agendamento de turma com **{profissional_nome}** para **{horario_str}** está com status: **{status_atual}**.")
         st.warning("Agendamentos de turmas não podem ser remarcados ou cancelados individualmente por este link.")
+        # (Feature 4) Se for turma PENDENTE, permite confirmar ou cancelar
+        if status_atual == "Pendente":
+             st.info("Por favor, confirme ou cancele seu agendamento:")
+             c1, c2 = st.columns(2)
+             c1.button("✅ Confirmar Aula", key=f"conf_turma_{ag_id}", on_click=handle_admin_action, args=(ag_id, "confirmar_cliente"))
+             c2.button("❌ Cancelar Aula", key=f"canc_turma_{ag_id}", type="primary", on_click=processar_cancelamento_seguro, args=(pin,))
         return
 
-    # Se não for turma, continua
-    if status_atual != "Confirmado":
-        st.warning(f"Este agendamento com **{agendamento.get('profissional_nome','N/A')}** para **{horario_str}** já se encontra com o status: **{status_atual}**.")
-        st.info("Nenhuma ação é necessária.")
-        return
+    # Se não for turma, continua...
 
-    # Se está Confirmado e é individual
-    st.info(f"Seu agendamento com **{agendamento.get('profissional_nome','N/A')}** está CONFIRMADO para:")
-    st.subheader(horario_str)
-    st.caption(f"Cliente: {agendamento.get('cliente','N/A')}")
-    st.markdown("---")
-
-    # Verifica se está no modo de remarcação para este agendamento
-    if st.session_state.get('remarcando'): # session_state específico da página PIN
+    # --- Modo de Remarcação (Formulário) ---
+    if st.session_state.get('remarcando'):
         st.subheader("Selecione o novo horário")
-
-        # Data Input - Usa 'nova_data_remarcacao' como antes
         nova_data = st.date_input("Nova data", key="nova_data_remarcacao", min_value=date.today())
-
         duracao_agendamento = agendamento.get('duracao_min', 30)
         st.info(f"Selecione um novo horário para o serviço de {duracao_agendamento} minutos.")
 
-        # Busca horários disponíveis
         horarios_disponiveis = gerar_horarios_disponiveis(
             agendamento.get('clinic_id'),
-            agendamento.get('profissional_nome'),
+            profissional_nome,
             nova_data,
             duracao_agendamento,
             agendamento_id_excluir=ag_id # Exclui o próprio agendamento
         )
 
-        # Formulário de remarcação
         with st.form("form_remarcacao"):
             if horarios_disponiveis:
-                # Selectbox - Usa 'nova_hora_remarcacao'
                 st.selectbox("Nova hora:", options=horarios_disponiveis, key="nova_hora_remarcacao", format_func=lambda t: t.strftime('%H:%M'))
                 pode_remarcar = True
             else:
                 st.selectbox("Nova hora:", options=["Nenhum horário disponível"], key="nova_hora_remarcacao", disabled=True)
                 pode_remarcar = False
 
-            # Botão Confirmar
             st.form_submit_button(
                 "✅ Confirmar Remarcação",
                 on_click=handle_remarcar_confirmacao,
-                args=(pin, ag_id, agendamento.get('profissional_nome')), # Passa os args corretos
+                args=(pin, ag_id, profissional_nome),
                 disabled=not pode_remarcar
             )
 
-        # Botão Voltar
         if st.button("⬅️ Voltar"):
-            st.session_state.remarcando = False # Desativa modo remarcação da página PIN
+            st.session_state.remarcando = False
             st.rerun()
-    else:
-        # Botões de Ação Padrão (Cancelar/Remarcar)
+        return # Para a execução aqui para não mostrar os botões abaixo
+
+    # --- Exibição de Status e Ações ---
+    st.info(f"Seu agendamento com **{profissional_nome}** (Serviço: **{agendamento.get('servico_nome','N/A')}**)")
+    st.subheader(horario_str)
+    st.caption(f"Cliente: {agendamento.get('cliente','N/A')}")
+    st.markdown("---")
+
+    if status_atual == "Pendente":
+        st.warning("Seu agendamento está **PENDENTE**.")
+        st.write("Por favor, confirme seu horário para garantir sua vaga. O horário não fica bloqueado até a confirmação.")
+        
+        col1, col2, col3 = st.columns(3)
+        # Botão Confirmar
+        col1.button("✅ CONFIRMAR AGENDAMENTO", key=f"conf_{ag_id}", on_click=handle_admin_action, args=(ag_id, "confirmar_cliente"))
+        
+        # Botão Cancelar
+        col2.button("❌ CANCELAR", key=f"canc_{ag_id}", type="primary", on_click=processar_cancelamento_seguro, args=(pin,))
+        
+        # Botão Remarcar
+        col3.button("🔄 REMARCAR", key=f"rem_{ag_id}", on_click=lambda: st.session_state.update(remarcando=True))
+
+    elif status_atual == "Confirmado":
+        st.success("Seu agendamento está **CONFIRMADO**.")
+        
         col1, col2 = st.columns(2)
-        if col1.button("❌ CANCELAR AGENDAMENTO", type="primary"):
-            if processar_cancelamento_seguro(pin):
-                st.success("Agendamento cancelado com sucesso.")
-                st.session_state.remarcando = False # Garante que sai do modo remarcação se estava
-                st.rerun() # Atualiza a página para mostrar o novo status
-            else:
-                st.error("Erro ao cancelar. O agendamento pode já ter sido alterado.")
+        # Botão Cancelar
+        col1.button("❌ CANCELAR AGENDAMENTO", key=f"canc_conf_{ag_id}", type="primary", on_click=processar_cancelamento_seguro, args=(pin,))
+        
+        # Botão Remarcar
+        col2.button("🔄 REMARCAR HORÁRIO", key=f"rem_conf_{ag_id}", on_click=lambda: st.session_state.update(remarcando=True))
 
+    else:
+        # Status "Cancelado...", "Finalizado", "No-Show"
+        st.info(f"Este agendamento se encontra com o status: **{status_atual}**.")
+        st.write("Nenhuma ação é necessária.")
 
-        # Botão para entrar no modo Remarcar
-        if col2.button("🔄 REMARCAR HORÁRIO"):
-            st.session_state.remarcando = True # Ativa modo remarcação da página PIN
-            st.rerun() # Mostra o formulário
+# (Feature 2a) Função auxiliar para renderizar o popover de troca de profissional
+def render_troca_profissional_popover(ag_dict: dict, profissionais_clinica: list, key_prefix: str = ""):
+    """Renderiza o popover e o formulário para trocar o profissional de um agendamento."""
+    
+    ag_id = ag_dict.get('id')
+    ag_horario = ag_dict.get('horario')
+    ag_duracao = ag_dict.get('duracao_min', 30)
+    ag_prof_atual = ag_dict.get('profissional_nome', 'N/A')
+    
+    # Filtra a lista de profissionais para excluir o atual
+    opcoes_profissionais = [p['nome'] for p in profissionais_clinica if p['nome'] != ag_prof_atual and p['nome'] != '[Sem Profissional]']
+    
+    if not opcoes_profissionais:
+        st.write("Não há outros profissionais disponíveis para troca.")
+        return
+
+    # Tenta obter o índice do profissional selecionado no state, se houver
+    selected_prof_index = 0
+    if f"swap_prof_select_{ag_id}" in st.session_state:
+        try:
+            selected_prof_index = opcoes_profissionais.index(st.session_state[f"swap_prof_select_{ag_id}"])
+        except ValueError:
+            pass # Mantém 0 se não encontrar
+
+    st.selectbox(
+        "Trocar para:",
+        options=opcoes_profissionais,
+        key=f"swap_prof_select_{ag_id}",
+        index=selected_prof_index,
+        label_visibility="collapsed"
+    )
+
+    st.button(
+        "Confirmar Troca",
+        key=f"{key_prefix}_swap_btn_{ag_id}",
+        on_click=handle_trocar_profissional_agendamento,
+        args=(ag_dict,) # Passa o dicionário inteiro do agendamento
+    )
+    
+    # Exibe mensagem de status da troca
+    status_troca = st.session_state.troca_prof_status.get(ag_id, {})
+    if status_troca:
+        if status_troca.get('sucesso'):
+            st.success(status_troca.get('mensagem'))
+        else:
+            st.error(status_troca.get('mensagem'))
+        del st.session_state.troca_prof_status[ag_id] # Limpa após exibir
 
 
 def render_gerenciar_pacotes(servicos_clinica):
@@ -1001,6 +1171,47 @@ def render_gerenciar_pacotes(servicos_clinica):
             with col2:
                 st.button("Remover", key=f"del_pacote_{pacote_id}", on_click=handle_remove_pacote_modelo, args=(st.session_state.clinic_id, pacote_id))
 
+# (Feature 5) Nova função para renderizar o resumo do dia
+def render_resumo_dia(clinic_id: str, data: date):
+    """Busca dados e renderiza os cartões de métrica do resumo do dia."""
+    
+    todos_ag_dia_df = buscar_agendamentos_por_intervalo(clinic_id, data, data)
+    
+    total_agendamentos = 0
+    profissionais_no_dia = 0
+    realizados = 0
+    confirmados = 0
+    pendentes = 0
+    cancelados_faltas = 0
+
+    if not todos_ag_dia_df.empty:
+        total_agendamentos = len(todos_ag_dia_df)
+        
+        # Filtra por status "Confirmado" ou "Finalizado" para contar profissionais
+        prof_ativos_df = todos_ag_dia_df[todos_ag_dia_df['status'].isin(['Confirmado', 'Finalizado'])]
+        profissionais_no_dia = prof_ativos_df['profissional_nome'].nunique()
+
+        status_counts = todos_ag_dia_df['status'].value_counts()
+        
+        realizados = status_counts.get("Finalizado", 0)
+        confirmados = status_counts.get("Confirmado", 0)
+        pendentes = status_counts.get("Pendente", 0)
+        cancelados = status_counts.get("Cancelado (Admin)", 0) + status_counts.get("Cancelado pelo Cliente", 0)
+        faltas = status_counts.get("No-Show", 0)
+        cancelados_faltas = cancelados + faltas
+    
+    st.subheader(f"Resumo do Dia: {data.strftime('%d/%m/%Y')}")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Total Agendado", total_agendamentos)
+    c2.metric("Profissionais Ativos", profissionais_no_dia)
+    c3.metric("Realizados", realizados)
+    c4.metric("Confirmados/Pendentes", f"{confirmados} / {pendentes}")
+    c5.metric("Cancelados/Faltas", cancelados_faltas)
+    
+    st.divider()
+    
+    # Retorna o dataframe com todos os agendamentos para ser reutilizado
+    return todos_ag_dia_df
 
 def render_backoffice_clinica():
     clinic_id = st.session_state.clinic_id
@@ -1065,7 +1276,7 @@ def render_backoffice_clinica():
 
             # Botões de Confirmar/Voltar
             c1, c2 = st.columns(2)
-            if c1.button("✅ Confirmar Agendamento", type="primary"):
+            if c1.button("✅ Enviar Agendamento Pendente", type="primary"): # (Feature 4) Texto do botão alterado
                 handle_agendamento_submission()
             if c2.button("❌ Voltar"):
                 st.session_state.confirmando_agendamento = False
@@ -1079,8 +1290,8 @@ def render_backoffice_clinica():
             if st.session_state.get('last_agendamento_info'):
                 info = st.session_state.last_agendamento_info
                 if info.get('status') is True:
-                    st.success(f"Agendado para {info.get('cliente')} com sucesso!")
-                    st.markdown(f"**LINK DE GESTÃO:** `{info.get('link_gestao', 'N/A')}` (PIN: **{info.get('pin_code', 'N/A')}**)")
+                    st.success(f"Agendado para {info.get('cliente')} com sucesso! (Status: Pendente)") # (Feature 4) Mensagem alterada
+                    st.markdown(f"**LINK DE GESTÃO (Enviar ao cliente):** `{info.get('link_gestao', 'N/A')}` (PIN: **{info.get('pin_code', 'N/A')}**)")
                 else:
                     st.error(f"Erro ao agendar para {info.get('cliente', 'cliente não informado')}: {info.get('status', 'Erro desconhecido')}")
                 st.session_state.last_agendamento_info = None # Limpa a mensagem
@@ -1093,9 +1304,7 @@ def render_backoffice_clinica():
             # Placeholder para mensagens sobre pacotes
             if 'pacote_status_placeholder' not in st.session_state or st.session_state.pacote_status_placeholder is None:
                 st.session_state.pacote_status_placeholder = st.empty()
-            # Chama a verificação inicial de pacotes (caso já haja cliente/serviço selecionado)
             # handle_verificar_pacotes() # Chamado no on_change do cliente e serviço
-
 
             st.subheader("2. Preencha os Detalhes do Agendamento")
 
@@ -1120,7 +1329,7 @@ def render_backoffice_clinica():
                 [s.get('nome','Serviço Inválido') for s in servicos_clinica],
                 key="c_servico_input",
                 on_change=handle_verificar_pacotes # Verifica pacotes quando o serviço muda
-             )
+            )
 
             # Busca dados do serviço selecionado
             servico_data = next((s for s in servicos_clinica if s.get('nome') == servico_selecionado_nome), None)
@@ -1160,10 +1369,10 @@ def render_backoffice_clinica():
 
                         # Busca nome do profissional da turma selecionada
                         if st.session_state.c_hora_input:
-                             turma_id_selecionado = st.session_state.c_hora_input[0]
-                             turma_selecionada_obj = next((t for t in turmas_clinica if t.get('id') == turma_id_selecionado), None)
-                             if turma_selecionada_obj:
-                                 profissional_nome_turma = turma_selecionada_obj.get('profissional_nome', 'N/A')
+                            turma_id_selecionado = st.session_state.c_hora_input[0]
+                            turma_selecionada_obj = next((t for t in turmas_clinica if t.get('id') == turma_id_selecionado), None)
+                            if turma_selecionada_obj:
+                                profissional_nome_turma = turma_selecionada_obj.get('profissional_nome', 'N/A')
                         pode_agendar = True # Pode agendar se houver turmas com vagas
                     else:
                         # Mostra mensagem se não houver turmas
@@ -1182,7 +1391,7 @@ def render_backoffice_clinica():
                     # Selectbox de Profissional
                     prof_selecionado_nome = form_cols[0].selectbox(
                         "Profissional:",
-                        [p.get('nome','Prof. Inválido') for p in profissionais_clinica],
+                        [p.get('nome','Prof. Inválido') for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'], # (Feature 2c) Filtra placeholder
                         key="c_prof_input"
                     )
                     # Gera horários disponíveis
@@ -1206,8 +1415,31 @@ def render_backoffice_clinica():
                         pode_agendar = False
 
             # Botão de Agendar (habilitado/desabilitado pela flag pode_agendar)
-            st.button("AGENDAR NOVA SESSÃO", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento)
+            st.button("AGENDAR (Enviar Link Pendente)", type="primary", disabled=not pode_agendar, on_click=handle_pre_agendamento) # (Feature 4) Texto alterado
 
+        # --- (Feature 2c) Painel de Agendamentos Sem Profissional ---
+        st.markdown("---")
+        st.header("⚠️ Agendamentos Sem Profissional")
+        agendamentos_sem_prof = buscar_agendamentos_sem_profissional(clinic_id)
+
+        if not agendamentos_sem_prof:
+            st.info("Nenhum agendamento futuro sem profissional associado.")
+        else:
+            st.warning("Os agendamentos abaixo precisam de um novo profissional.")
+            for ag_sem in agendamentos_sem_prof:
+                ag_id_sem = ag_sem.get('id')
+                horario_ag_sem = ag_sem.get('horario')
+                horario_str_sem = horario_ag_sem.strftime('%d/%m/%Y às %H:%M') if isinstance(horario_ag_sem, datetime) else "Horário Inválido"
+
+                cols_sem = st.columns([0.5, 0.3, 0.2])
+                cols_sem[0].write(f"**{ag_sem.get('cliente','N/A')}** ({ag_sem.get('servico_nome','N/A')})")
+                cols_sem[1].write(f"{horario_str_sem}")
+                
+                # Popover para Reatribuir
+                with cols_sem[2].popover("Reatribuir 🔁", help="Reatribuir profissional"):
+                    # Passa o dicionário completo do agendamento
+                    render_troca_profissional_popover(ag_sem, profissionais_clinica, key_prefix="sem_prof")
+        
         # --- Visualização da Agenda ---
         st.markdown("---")
         st.header("🗓️ Visualização da Agenda")
@@ -1219,8 +1451,16 @@ def render_backoffice_clinica():
         with view_tab1:
             st.date_input("Filtrar por data:", key='filter_data_selecionada', format="DD/MM/YYYY")
 
-            # Busca agendamentos confirmados para a data selecionada
-            agenda_do_dia = buscar_agendamentos_por_data(clinic_id, st.session_state.filter_data_selecionada)
+            # (Feature 5) Renderiza o Resumo do Dia e obtém todos os agendamentos
+            todos_ag_dia_df = render_resumo_dia(clinic_id, st.session_state.filter_data_selecionada)
+
+            # (Feature 5) Filtra apenas os confirmados para a lista principal
+            # (Feature 4) Também inclui 'Pendente' na lista para o admin ver
+            status_para_exibir = ['Confirmado', 'Pendente']
+            agenda_do_dia = todos_ag_dia_df[
+                todos_ag_dia_df['status'].isin(status_para_exibir)
+            ].sort_values(by='horario')
+
 
             if not agenda_do_dia.empty:
                 # Separa agendamentos de turma e individuais
@@ -1253,7 +1493,7 @@ def render_backoffice_clinica():
                             # Adiciona o cliente (como dict) à lista da turma
                             turmas_na_agenda[key]['clientes'].append(row)
                         else:
-                             print(f"WARN: Agendamento de turma ID {row.get('id')} sem horário válido.")
+                            print(f"WARN: Agendamento de turma ID {row.get('id')} sem horário válido.", file=sys.stderr)
                     else:
                         # Adiciona agendamento individual (como dict) à lista
                         agendamentos_individuais.append(row)
@@ -1265,11 +1505,22 @@ def render_backoffice_clinica():
                     for (turma_id, _), turma_data in sorted(turmas_na_agenda.items(), key=lambda item: item[1]['horario']):
                         horario_turma = turma_data['horario']
                         horario_turma_str = horario_turma.strftime('%H:%M') if isinstance(horario_turma, datetime) else "HH:MM"
-                        expander_title = f"{horario_turma_str} - {turma_data.get('nome_turma','N/A')} ({turma_data.get('profissional_nome','N/A')}) - {len(turma_data.get('clientes',[]))}/{turma_data.get('capacidade','N/A')} vagas"
+                        
+                        # (Feature 4) Mostra status da turma (Pendente/Confirmado)
+                        clientes_pendentes = sum(1 for c in turma_data.get('clientes',[]) if c.get('status') == 'Pendente')
+                        clientes_confirmados = len(turma_data.get('clientes',[])) - clientes_pendentes
+
+                        expander_title = (
+                            f"{horario_turma_str} - {turma_data.get('nome_turma','N/A')} ({turma_data.get('profissional_nome','N/A')}) | "
+                            f"Confirmados: {clientes_confirmados} | Pendentes: {clientes_pendentes} | Total: {turma_data.get('capacidade','N/A')}"
+                        )
+                        
                         with st.expander(expander_title):
                             for cliente_row in turma_data.get('clientes',[]):
                                 # Exibe nome, serviço e telefone do cliente na turma
-                                st.write(f" - {cliente_row.get('cliente','N/A')} ({cliente_row.get('servico_nome', 'N/A')}) (Tel: {cliente_row.get('telefone', 'N/A')})")
+                                status_cliente = cliente_row.get('status', 'N/A')
+                                emoji_status = "⌛" if status_cliente == "Pendente" else "✅"
+                                st.write(f" {emoji_status} {cliente_row.get('cliente','N/A')} ({cliente_row.get('servico_nome', 'N/A')}) (Tel: {cliente_row.get('telefone', 'N/A')})")
                     st.divider()
 
                 # Renderiza Agendamentos Individuais (se houver)
@@ -1289,16 +1540,17 @@ def render_backoffice_clinica():
                         st.session_state.agendamentos_selecionados[ag_id] = selecionado
 
                         # Info Cliente/Serviço (coluna 1)
-                        data_cols[1].write(f"**{row.get('cliente','N/A')}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
+                        status_emoji = "⌛" if row.get('status') == "Pendente" else "✅"
+                        data_cols[1].write(f"{status_emoji} **{row.get('cliente','N/A')}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
                         # Info Profissional/Hora (coluna 2)
                         data_cols[2].write(f"{row.get('profissional_nome','N/A')} - {horario_ag_str}")
 
                         # Botões de Ação (coluna 3)
                         with data_cols[3]:
-                            action_cols = st.columns(5) # 5 botões de ação
+                            # (Feature 2a) Adicionada 1 coluna para troca de prof (total 6)
+                            action_cols = st.columns(6) 
 
                             # Popover Detalhes (ℹ️)
-                            # CORREÇÃO: Removido 'key' do popover
                             detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
                             with detalhes_popover:
                                 pin = row.get('pin_code', 'N/A')
@@ -1307,42 +1559,63 @@ def render_backoffice_clinica():
                                 st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
                                 st.markdown(f"**PIN:** `{pin}`")
                                 st.markdown(f"**Link:** `{link}`")
-                                # Mostra se usou pacote
                                 if pd.notna(row.get('pacote_cliente_id')):
                                     st.markdown(f"**Usou Pacote:** Sim")
 
                             # Popover WPP (💬)
-                            # CORREÇÃO: Removido 'key' do popover
                             wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
                             with wpp_popover:
                                 pin = row.get('pin_code', 'N/A')
                                 link_gestao = f"https://agendafit.streamlit.app?pin={pin}" if pin != 'N/A' else 'N/A'
                                 horario_str_msg = horario_ag.strftime('%d/%m/%Y às %H:%M') if isinstance(horario_ag, datetime) else "Data/Hora Inválida"
+                                
+                                # (Feature 3) Lógica para buscar info do pacote
+                                pacote_msg_extra = ""
+                                pacote_id = row.get('pacote_cliente_id')
+                                cliente_id_wpp = row.get('cliente_id')
+                                
+                                if pd.notna(pacote_id) and pd.notna(cliente_id_wpp):
+                                    pacote_data = get_pacote_cliente_by_id(clinic_id, cliente_id_wpp, pacote_id)
+                                    if pacote_data:
+                                        creditos = pacote_data.get('creditos_restantes', 'N/A')
+                                        expira_dt = pacote_data.get('data_expiracao')
+                                        expira_str = expira_dt.strftime('%d/%m/%Y') if isinstance(expira_dt, datetime) else 'N/A'
+                                        pacote_msg_extra = f"\n\nℹ️ *Info Pacote: Você tem {creditos} créditos restantes, válidos até {expira_str}.*"
+
+                                # (Feature 4) Mensagem ajustada para o fluxo "Pendente"
+                                texto_confirmacao = "Para confirmar, remarcar ou cancelar" if row.get('status') == "Pendente" else "Para gerenciar (remarcar ou cancelar)"
+
                                 mensagem = (
                                     f"Olá, {row.get('cliente','Cliente')}! Tudo bem?\n\n"
                                     f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row.get('profissional_nome','N/A')} "
                                     f"no dia {horario_str_msg}.\n\n"
-                                    f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                                    f"{texto_confirmacao}, por favor, use este link: {link_gestao}"
+                                    f"{pacote_msg_extra}" # (Feature 3) Adiciona info do pacote
                                 )
-                                # Usa a chave única no text_area
                                 st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
                                 st.write("Copie a mensagem acima e envie para o cliente.")
 
+                            # (Feature 2a) Popover Trocar Profissional (🔁)
+                            with action_cols[2].popover("🔁", help="Trocar Profissional"):
+                                # Passa o dicionário 'row'
+                                render_troca_profissional_popover(row, profissionais_clinica, key_prefix="agenda")
+
                             # Botões de Ação Direta
-                            action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                            action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                            action_cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                            action_cols[3].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                            action_cols[4].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                            action_cols[5].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
 
                         # Mostra se usou pacote abaixo do agendamento
                         if row.get('pacote_cliente_id'):
                             st.caption("💳 Agendamento via Pacote")
 
-                    # Botão para cancelar selecionados (se houver)
-                    if any(st.session_state.agendamentos_selecionados.values()):
-                        st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
+                # Botão para cancelar selecionados (se houver)
+                if any(st.session_state.agendamentos_selecionados.values()):
+                    st.button("❌ Cancelar Selecionados", type="primary", on_click=handle_cancelar_selecionados)
+            
             # Mensagem se não houver agendamentos no dia
-            else:
-                st.info(f"Nenhuma consulta confirmada para {st.session_state.filter_data_selecionada.strftime('%d/%m/%Y')}.")
+            elif not agendamentos_sem_prof: # Só mostra se a lista de sem-prof também estiver vazia
+                st.info(f"Nenhum agendamento pendente ou confirmado para {st.session_state.filter_data_selecionada.strftime('%d/%m/%Y')}.")
 
         # Aba Visão Semanal
         with view_tab2:
@@ -1350,7 +1623,7 @@ def render_backoffice_clinica():
             if not profissionais_clinica:
                 st.warning("Cadastre um profissional para ver a agenda semanal.")
             else:
-                prof_selecionado = st.selectbox("Selecione o Profissional", options=[p['nome'] for p in profissionais_clinica], key="semanal_prof_select")
+                prof_selecionado = st.selectbox("Selecione o Profissional", options=[p['nome'] for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'], key="semanal_prof_select")
                 today = date.today()
                 start_of_week = today - timedelta(days=today.weekday())
 
@@ -1368,7 +1641,7 @@ def render_backoffice_clinica():
             if not profissionais_clinica:
                 st.warning("Cadastre profissionais para comparar as agendas.")
             else:
-                df_comparativo = gerar_visao_comparativa(clinic_id, data_comparativa, [p['nome'] for p in profissionais_clinica])
+                df_comparativo = gerar_visao_comparativa(clinic_id, data_comparativa, [p['nome'] for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'])
                 # Mostra o DataFrame com alinhamento centralizado
                 st.dataframe(df_comparativo.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
@@ -1381,15 +1654,15 @@ def render_backoffice_clinica():
 
             # Prepara mapas para selectboxes
             servicos_map = {s['nome']: s['id'] for s in servicos_clinica if s.get('tipo') == 'Em Grupo'}
-            profissionais_map = {p['nome']: p['id'] for p in profissionais_clinica}
+            profissionais_map = {p['nome']: p['id'] for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'}
 
             # Verifica se há serviços e profissionais necessários
             if not servicos_map:
                 st.warning("Para criar uma turma, primeiro cadastre um serviço do tipo 'Em Grupo' na aba 'Gerenciar Serviços'.")
                 st.form_submit_button("Criar Turma", disabled=True) # Desabilita botão
             elif not profissionais_map:
-                 st.warning("Para criar uma turma, primeiro cadastre um profissional na aba 'Gerenciar Profissionais'.")
-                 st.form_submit_button("Criar Turma", disabled=True) # Desabilita botão
+                st.warning("Para criar uma turma, primeiro cadastre um profissional na aba 'Gerenciar Profissionais'.")
+                st.form_submit_button("Criar Turma", disabled=True) # Desabilita botão
             else:
                 # Inputs do formulário
                 c1, c2 = st.columns(2)
@@ -1420,7 +1693,7 @@ def render_backoffice_clinica():
         else:
             # Mapas necessários para os selects de edição
             servicos_map = {s['nome']: s['id'] for s in servicos_clinica if s.get('tipo') == 'Em Grupo'}
-            profissionais_map = {p['nome']: p['id'] for p in profissionais_clinica}
+            profissionais_map = {p['nome']: p['id'] for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'}
 
             # Selectbox para escolher a turma a editar
             turmas_map_edit = {t.get('nome','Nome Inválido'): t.get('id') for t in turmas_clinica}
@@ -1477,9 +1750,9 @@ def render_backoffice_clinica():
 
                         # Selectbox Profissional (com índice padrão)
                         prof_nome_selecionado_edit = c4_edit.selectbox("Profissional Responsável",
-                                                                     options=prof_nomes_list,
-                                                                     key=f"edit_turma_prof_nome_{turma_id_para_editar}",
-                                                                     index=index_prof)
+                                                                       options=prof_nomes_list,
+                                                                       key=f"edit_turma_prof_nome_{turma_id_para_editar}",
+                                                                       index=index_prof)
                         # Guarda o ID do profissional selecionado no estado
                         st.session_state[f"edit_turma_profissional_{turma_id_para_editar}"] = profissionais_map.get(prof_nome_selecionado_edit)
 
@@ -1529,7 +1802,7 @@ def render_backoffice_clinica():
                 grade_df = grade_df.sort_index() # Ordena pelas horas
                 st.dataframe(grade_df, use_container_width=True)
             else:
-                 st.info("Nenhuma turma encontrada para exibir na grade.")
+                st.info("Nenhuma turma encontrada para exibir na grade.")
 
 
         st.divider()
@@ -1595,7 +1868,11 @@ def render_backoffice_clinica():
                 with col_graf2:
                     st.subheader("Atendimentos por Profissional")
                     if 'profissional_nome' in df_dashboard.columns:
-                        prof_counts = df_dashboard['profissional_nome'].value_counts()
+                        # (Feature 2c) Exclui o placeholder da contagem
+                        prof_counts = df_dashboard[
+                            df_dashboard['profissional_nome'] != '[Sem Profissional]'
+                        ]['profissional_nome'].value_counts()
+                        
                         fig_bar = go.Figure(data=[go.Bar(x=prof_counts.index, y=prof_counts.values)])
                         fig_bar.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), xaxis_title=None, yaxis_title="Nº de Atendimentos")
                         st.plotly_chart(fig_bar, use_container_width=True)
@@ -1634,8 +1911,8 @@ def render_backoffice_clinica():
                         try:
                             heatmap_data = df_confirmados.pivot_table(index='hora', columns='dia_semana_num', values='id', aggfunc='count').fillna(0)
                         except Exception as e_pivot:
-                             st.error(f"Erro ao criar pivot table para heatmap: {e_pivot}")
-                             heatmap_data = pd.DataFrame() # Cria df vazio em caso de erro
+                            st.error(f"Erro ao criar pivot table para heatmap: {e_pivot}")
+                            heatmap_data = pd.DataFrame() # Cria df vazio em caso de erro
 
                         if not heatmap_data.empty:
                             # Renomeia colunas numéricas para nomes dos dias
@@ -1659,12 +1936,12 @@ def render_backoffice_clinica():
                             fig_heatmap.update_layout(title='Concentração de Agendamentos por Dia e Hora', xaxis_nticks=7, yaxis_title="Hora do Dia")
                             st.plotly_chart(fig_heatmap, use_container_width=True)
 
-                    else:
-                        st.warning("Coluna 'id' não encontrada para gerar o mapa de calor.")
+                        else:
+                            st.warning("Coluna 'id' não encontrada para gerar o mapa de calor.")
                 elif df_confirmados.empty:
                     st.info("Não há dados de agendamentos confirmados ou finalizados para gerar o mapa de calor.")
                 else:
-                     st.warning("Coluna 'horario' ausente ou inválida para gerar o mapa de calor.")
+                    st.warning("Coluna 'horario' ausente ou inválida para gerar o mapa de calor.")
 
     # --- Aba Gerenciar Clientes ---
     elif active_tab == "👤 Gerenciar Clientes":
@@ -1732,7 +2009,7 @@ def render_backoffice_clinica():
                             })
                         # Exibe DataFrame com os pacotes
                         if data_pacotes:
-                             st.dataframe(pd.DataFrame(data_pacotes), use_container_width=True, hide_index=True)
+                            st.dataframe(pd.DataFrame(data_pacotes), use_container_width=True, hide_index=True)
 
 
                     # Seção para Associar Novo Pacote
@@ -1763,11 +2040,12 @@ def render_backoffice_clinica():
                     st.subheader("Agendamentos Futuros")
 
                     # Busca agendamentos futuros usando o ID do cliente
+                    # (Feature 4) Busca 'Pendente' e 'Confirmado'
                     agendamentos_futuros = buscar_agendamentos_futuros_por_cliente(clinic_id, cliente_id)
 
                     # Exibe mensagem se não houver agendamentos
                     if not agendamentos_futuros:
-                        st.info("Cliente não possui agendamentos futuros confirmados.")
+                        st.info("Cliente não possui agendamentos futuros (pendentes ou confirmados).")
                     else:
                         # Loop para exibir cada agendamento futuro
                         for ag in agendamentos_futuros:
@@ -1780,27 +2058,28 @@ def render_backoffice_clinica():
                             # Determina se é turma ou individual e se pode remarcar
                             if ag.get('turma_id'):
                                 tipo_ag = f"Turma: {turmas_map.get(ag['turma_id'], 'N/A')}"
-                                pode_remarcar = False
+                                pode_remarcar_trocar = False # (Feature 2a) Não pode trocar prof de turma
                             else:
                                 tipo_ag = f"Serviço: {ag.get('servico_nome', 'N/A')}"
-                                pode_remarcar = True # Só pode remarcar individual
+                                pode_remarcar_trocar = True # Só pode remarcar/trocar individual
 
                             # Layout para infos e botões
                             info_cols, button_cols = st.columns([0.6, 0.4])
 
                             # Exibe informações do agendamento
                             with info_cols:
-                                st.write(f"**{horario_str}**")
+                                status_emoji = "⌛" if ag.get('status') == "Pendente" else "✅"
+                                st.write(f"{status_emoji} **{horario_str}**")
                                 st.write(f"<small>{ag.get('profissional_nome','N/A')} ({tipo_ag})</small>", unsafe_allow_html=True)
                                 if ag.get('pacote_cliente_id'):
                                     st.caption("💳 Agendamento via Pacote")
 
                             # Exibe botões de ação
                             with button_cols:
-                                num_cols = 6 if pode_remarcar else 5 # 6 botões se puder remarcar
+                                num_cols = 7 if pode_remarcar_trocar else 5 # (Feature 2a) 7 botões se puder remarcar/trocar
                                 action_cols = st.columns(num_cols)
 
-                                # Popover Detalhes (ℹ️) - CORRIGIDO: sem 'key'
+                                # Popover Detalhes (ℹ️)
                                 detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
                                 with detalhes_popover:
                                     pin = ag.get('pin_code', 'N/A')
@@ -1812,62 +2091,83 @@ def render_backoffice_clinica():
                                     if pd.notna(ag.get('pacote_cliente_id')):
                                         st.markdown(f"**Usou Pacote:** Sim")
 
-                                # Popover WPP (💬) - CORRIGIDO: sem 'key'
+                                # Popover WPP (💬)
                                 wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
                                 with wpp_popover:
                                     pin = ag.get('pin_code', 'N/A')
                                     link_gestao = f"https://agendafit.streamlit.app?pin={pin}" if pin != 'N/A' else 'N/A'
                                     horario_str_msg = horario_ag.strftime('%d/%m/%Y às %H:%M') if isinstance(horario_ag, datetime) else "Data/Hora Inválida"
+
+                                    # (Feature 3) Lógica para buscar info do pacote
+                                    pacote_msg_extra = ""
+                                    pacote_id = ag.get('pacote_cliente_id')
+                                    # cliente_id já está disponível no loop externo
+                                    
+                                    if pd.notna(pacote_id) and pd.notna(cliente_id):
+                                        pacote_data = get_pacote_cliente_by_id(clinic_id, cliente_id, pacote_id)
+                                        if pacote_data:
+                                            creditos = pacote_data.get('creditos_restantes', 'N/A')
+                                            expira_dt = pacote_data.get('data_expiracao')
+                                            expira_str = expira_dt.strftime('%d/%m/%Y') if isinstance(expira_dt, datetime) else 'N/A'
+                                            pacote_msg_extra = f"\n\nℹ️ *Info Pacote: Você tem {creditos} créditos restantes, válidos até {expira_str}.*"
+
+                                    # (Feature 4) Mensagem ajustada para o fluxo "Pendente"
+                                    texto_confirmacao = "Para confirmar, remarcar ou cancelar" if ag.get('status') == "Pendente" else "Para gerenciar (remarcar ou cancelar)"
+
                                     mensagem = (
                                         f"Olá, {ag.get('cliente','Cliente')}! Tudo bem?\n\n"
                                         f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {ag.get('profissional_nome','N/A')} "
                                         f"no dia {horario_str_msg}.\n\n"
-                                        f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
+                                        f"{texto_confirmacao}, por favor, use este link: {link_gestao}"
+                                        f"{pacote_msg_extra}" # (Feature 3) Adiciona info do pacote
                                     )
-                                    st.text_area("Mensagem:", value=mensagem, height=200, key=f"cl_wpp_msg_{ag_id}") # Key aqui é necessário
+                                    st.text_area("Mensagem:", value=mensagem, height=200, key=f"cl_wpp_msg_{ag_id}")
                                     st.write("Copie a mensagem acima e envie para o cliente.")
 
+                                # (Feature 2a) Popover Trocar Profissional (🔁)
+                                if pode_remarcar_trocar:
+                                    with action_cols[2].popover("🔁", help="Trocar Profissional"):
+                                        render_troca_profissional_popover(ag, profissionais_clinica, key_prefix="cliente")
+                                else:
+                                    # Apenas para manter o alinhamento, se não puder trocar
+                                    action_cols[2].write("") 
+
+
                                 # Botões de Ação Direta (Finalizar, No-Show, Cancelar)
-                                action_cols[2].button("✅", key=f"cl_finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
-                                action_cols[3].button("🚫", key=f"cl_noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
-                                action_cols[4].button("❌", key=f"cl_cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                                btn_idx_start = 3 if pode_remarcar_trocar else 2
+                                action_cols[btn_idx_start].button("✅", key=f"cl_finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
+                                action_cols[btn_idx_start+1].button("🚫", key=f"cl_noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
+                                action_cols[btn_idx_start+2].button("❌", key=f"cl_cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
 
                                 # Botão Remarcar (🔄) - Condicional
-                                if pode_remarcar:
-                                    action_cols[5].button(
+                                if pode_remarcar_trocar:
+                                    action_cols[btn_idx_start+3].button(
                                         "🔄",
                                         key=f"cl_remarcar_{ag_id}",
                                         on_click=handle_iniciar_remarcacao_cliente,
                                         args=(ag,), # Passa o dict do agendamento
                                         help="Remarcar Horário",
-                                        # Desabilita se já estiver remarcando este
                                         disabled=(st.session_state.remarcando_cliente_ag_id == ag_id)
                                     )
 
                             # --- Formulário de Remarcação (Condicional) ---
-                            # Mostra apenas se o botão Remarcar foi clicado para ESTE agendamento
                             if st.session_state.remarcando_cliente_ag_id == ag_id:
                                 with st.form(key=f"form_remarcacao_cliente_{ag_id}"):
                                     st.write(f"Remarcando agendamento de {horario_str}")
 
-                                    # Input Data Remarcação
-                                    # Usa o valor do estado ou o padrão (data atual do ag. ou hoje)
                                     data_default_rem = st.session_state.remarcacao_cliente_form_data.get(ag_id, date.today())
                                     nova_data = st.date_input(
                                         "Nova Data",
-                                        key=f"rem_data_{ag_id}", # Key única
+                                        key=f"rem_data_{ag_id}",
                                         value=data_default_rem,
                                         min_value=date.today()
                                     )
-                                    # Atualiza o estado da data SE ela mudar no input
                                     if nova_data != data_default_rem:
                                         st.session_state.remarcacao_cliente_form_data[ag_id] = nova_data
-                                        # Limpa a hora selecionada se a data mudou
                                         if ag_id in st.session_state.remarcacao_cliente_form_hora:
                                             del st.session_state.remarcacao_cliente_form_hora[ag_id]
 
 
-                                    # Gera horários disponíveis para a nova data
                                     horarios_disp = gerar_horarios_disponiveis(
                                         clinic_id,
                                         ag.get('profissional_nome','N/A'),
@@ -1876,43 +2176,39 @@ def render_backoffice_clinica():
                                         agendamento_id_excluir=ag_id # Exclui o próprio agendamento
                                     )
 
-                                    # Selectbox Hora Remarcação
                                     hora_selecionada_rem = None
                                     pode_confirmar = False
                                     if horarios_disp:
-                                        # Tenta manter a hora selecionada se ainda for válida
                                         hora_atual_rem = st.session_state.remarcacao_cliente_form_hora.get(ag_id)
                                         default_hora_index_rem = 0
                                         if hora_atual_rem in horarios_disp:
                                             try:
                                                 default_hora_index_rem = horarios_disp.index(hora_atual_rem)
-                                            except ValueError: pass # Mantém 0 se não encontrar
+                                            except ValueError: pass
 
                                         hora_selecionada_rem = st.selectbox(
-                                            "Nova Hora", options=horarios_disp, key=f"rem_hora_sel_{ag_id}", # Key única
+                                            "Nova Hora", options=horarios_disp, key=f"rem_hora_sel_{ag_id}",
                                             index=default_hora_index_rem,
                                             format_func=lambda t: t.strftime('%H:%M') if isinstance(t, time) else "Inválido"
                                         )
-                                        # Atualiza o estado da hora
                                         st.session_state.remarcacao_cliente_form_hora[ag_id] = hora_selecionada_rem
                                         pode_confirmar = True
                                     else:
                                         st.selectbox("Nova Hora", options=["Nenhum horário disponível"], disabled=True, key=f"rem_hora_sel_{ag_id}")
-                                        st.session_state.remarcacao_cliente_form_hora[ag_id] = None # Limpa hora no estado
+                                        st.session_state.remarcacao_cliente_form_hora[ag_id] = None
                                         pode_confirmar = False
 
-                                    # Botões Confirmar/Voltar do formulário
                                     form_cols_rem = st.columns(2)
                                     form_cols_rem[0].form_submit_button(
                                         "✅ Confirmar",
                                         on_click=handle_confirmar_remarcacao_cliente,
-                                        args=(ag,), # Passa o dict do agendamento
+                                        args=(ag,),
                                         disabled=not pode_confirmar
                                     )
                                     form_cols_rem[1].form_submit_button(
                                         "Voltar",
                                         on_click=handle_cancelar_remarcacao_cliente,
-                                        args=(ag_id,) # Passa o ID para cancelar
+                                        args=(ag_id,)
                                     )
 
                                 # Exibe mensagens de status da remarcação
@@ -1961,32 +2257,40 @@ def render_backoffice_clinica():
         st.subheader("Profissionais Cadastrados")
         if profissionais_clinica:
             for prof in profissionais_clinica:
+                # (Feature 2c) Não exibe o profissional placeholder
+                if prof.get('nome') == '[Sem Profissional]':
+                    continue
+                    
                 prof_id = prof.get('id', f"NO_ID_{prof.get('nome')}")
                 col1, col2 = st.columns([0.8, 0.2])
                 col1.write(prof.get('nome','Sem Nome'))
-                col2.button("Remover", key=f"del_{prof_id}", on_click=handle_remove_profissional, args=(clinic_id, prof_id))
+                # (Feature 2c) Passa o nome para o handler de remoção
+                col2.button("Remover", key=f"del_{prof_id}", on_click=handle_remove_profissional, args=(clinic_id, prof_id, prof.get('nome')))
         else:
             st.info("Nenhum profissional cadastrado.")
 
     elif active_tab == "⚙️ Configurações":
         st.header("⚙️ Configurações da Clínica")
         st.subheader("Horários de Trabalho dos Profissionais")
-        if not profissionais_clinica:
+        
+        profissionais_config = [p for p in profissionais_clinica if p.get('nome') != '[Sem Profissional]'] # (Feature 2c) Filtra
+        
+        if not profissionais_config:
             st.info("Cadastre profissionais na aba 'Gerenciar Profissionais' para definir seus horários.")
         else:
-            prof_dict = {p.get('nome','Nome Inválido'): p.get('id') for p in profissionais_clinica}
+            prof_dict = {p.get('nome','Nome Inválido'): p.get('id') for p in profissionais_config}
             prof_nomes_sorted = sorted(list(prof_dict.keys()))
             prof_selecionado_nome = st.selectbox(
                 "Selecione um profissional para configurar",
-                 options=prof_nomes_sorted,
-                 key="selectbox_prof_config"
+                options=prof_nomes_sorted,
+                key="selectbox_prof_config"
             )
 
 
             if prof_selecionado_nome:
                 prof_id = prof_dict.get(prof_selecionado_nome)
                 if prof_id: # Garante que o ID foi encontrado
-                    prof_data = next((p for p in profissionais_clinica if p.get('id') == prof_id), None)
+                    prof_data = next((p for p in profissionais_config if p.get('id') == prof_id), None)
                     horarios_salvos = prof_data.get('horario_trabalho', {}) if prof_data else {}
 
                     # Se estiver editando este profissional, mostra o formulário
@@ -2059,14 +2363,14 @@ def render_backoffice_clinica():
         if feriados:
             st.write("Datas bloqueadas cadastradas:")
             for feriado in feriados:
-                 feriado_id = feriado.get('id')
-                 if feriado_id: # Garante que há ID
-                     data_f = feriado.get('data')
-                     data_str = data_f.strftime('%d/%m/%Y') if isinstance(data_f, date) else "Data Inválida"
-                     c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
-                     c1.write(data_str)
-                     c2.write(feriado.get('descricao', 'N/A'))
-                     c3.button("Remover", key=f"del_feriado_{feriado_id}", on_click=handle_remove_feriado, args=(clinic_id, feriado_id))
+                feriado_id = feriado.get('id')
+                if feriado_id: # Garante que há ID
+                    data_f = feriado.get('data')
+                    data_str = data_f.strftime('%d/%m/%Y') if isinstance(data_f, date) else "Data Inválida"
+                    c1, c2, c3 = st.columns([0.4, 0.4, 0.2])
+                    c1.write(data_str)
+                    c2.write(feriado.get('descricao', 'N/A'))
+                    c3.button("Remover", key=f"del_feriado_{feriado_id}", on_click=handle_remove_feriado, args=(clinic_id, feriado_id))
         else:
             st.info("Nenhuma data bloqueada cadastrada.")
 
