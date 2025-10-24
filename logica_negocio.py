@@ -3,6 +3,12 @@
 # 1. Novas importações de 'database' para pacotes.
 # 2. Nova função: buscar_pacotes_validos_cliente
 # 3. Nova função: associar_pacote_cliente
+# --- INÍCIO DAS NOVAS ATUALIZAÇÕES ---
+# 4. (Feature 4) `acao_admin_agendamento`: Adicionado "confirmar_cliente" ao status_map.
+# 5. (Feature 2c) Nova função: `processar_desligamento_profissional`.
+# 6. (Feature 2c) Importadas novas funções de DB: `db_remover_profissional`, `buscar_agendamentos_futuros_por_profissional`, `desassociar_profissional_agendamento`.
+# 7. (Feature 5) `buscar_agendamentos_por_data`: Modificado para filtrar por 'Confirmado' E 'Pendente'.
+# --- FIM DAS NOVAS ATUALIZAÇÕES ---
 
 import uuid
 from datetime import datetime, date, time, timedelta
@@ -10,6 +16,7 @@ import pandas as pd
 import random
 from zoneinfo import ZoneInfo
 import requests # Para buscar feriados
+import sys # Para logs
 
 # Importações de funções de DB
 from database import (
@@ -25,7 +32,11 @@ from database import (
     listar_pacotes_modelos,
     listar_pacotes_do_cliente,
     associar_pacote_ao_cliente as db_associar_pacote_ao_cliente,
-    listar_servicos # Necessário para buscar_pacotes_validos
+    listar_servicos, # Necessário para buscar_pacotes_validos
+    # --- (Feature 2c) Novas Importações ---
+    remover_profissional as db_remover_profissional,
+    buscar_agendamentos_futuros_por_profissional,
+    desassociar_profissional_agendamento
 )
 
 TZ_SAO_PAULO = ZoneInfo('America/Sao_Paulo')
@@ -42,13 +53,15 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
     
     profissionais = listar_profissionais(clinic_id)
     profissional_data = next((p for p in profissionais if p['nome'] == profissional_nome), None)
+
     if not profissional_data:
         return False, "Profissional não encontrado."
 
     horarios_trabalho = profissional_data.get('horario_trabalho', {})
     dia_key = DIAS_MAP_WEEKDAY_TO_KEY[data_hora_inicio.weekday()]
+    
     horario_dia = horarios_trabalho.get(dia_key)
-
+    
     if not horario_dia or not horario_dia.get('ativo'):
         dia_semana_nome = DIAS_SEMANA_PT.get(data_hora_inicio.weekday(), '')
         return False, f"O profissional não trabalha neste dia da semana ({dia_semana_nome})."
@@ -80,32 +93,40 @@ def verificar_disponibilidade_com_duracao(clinic_id: str, profissional_nome: str
         agendamentos_individuais = agendamentos_individuais[agendamentos_individuais['id'] != agendamento_id_excluir]
 
     if not agendamentos_individuais.empty:
+        # (Feature 4) Verifica conflito com Pendentes E Confirmados
+        status_conflito = ['Confirmado', 'Pendente']
         for _, ag in agendamentos_individuais.iterrows():
-            if ag['status'] == 'Confirmado':
+            if ag['status'] in status_conflito:
                 dt_inicio_existente = ag['horario']
                 duracao_existente = int(ag.get('duracao_min', 30))
                 dt_fim_existente = dt_inicio_existente + timedelta(minutes=duracao_existente)
                 
                 if data_hora_inicio < dt_fim_existente and dt_inicio_existente < dt_fim_novo:
-                    return False, f"Conflito com agendamento das {dt_inicio_existente.strftime('%H:%M')}."
+                    return False, f"Conflito com agendamento das {dt_inicio_existente.strftime('%H:%M')} (Status: {ag['status']})."
 
     return True, "Horário disponível."
 
 def processar_cancelamento_seguro(pin_code: str) -> bool:
     agendamento = buscar_agendamento_por_pin(pin_code)
-    if agendamento and agendamento['status'] == "Confirmado":
+    # (Feature 4) Permite cancelar se estiver Pendente OU Confirmado
+    if agendamento and agendamento['status'] in ["Confirmado", "Pendente"]:
         return atualizar_status_agendamento(agendamento['id'], "Cancelado pelo Cliente")
     return False
 
 def acao_admin_agendamento(agendamento_id: str, acao: str) -> bool:
+    
     status_map = {
         "cancelar": "Cancelado (Admin)",
         "finalizar": "Finalizado",
         "no-show": "No-Show",
+        "confirmar_cliente": "Confirmado" # (Feature 4) Nova ação
     }
+    
     novo_status = status_map.get(acao)
+    
     if novo_status:
         return atualizar_status_agendamento(agendamento_id, novo_status)
+    
     return False
 
 def get_dados_dashboard(clinic_id: str, start_date: date, end_date: date) -> pd.DataFrame:
@@ -121,7 +142,10 @@ def buscar_agendamentos_por_data(clinic_id: str, data_selecionada: date):
     if todos_agendamentos.empty:
         return pd.DataFrame()
     
-    filtro = (todos_agendamentos['horario'].dt.date == data_selecionada) & (todos_agendamentos['status'] == 'Confirmado')
+    # (Feature 4) Filtro modificado para incluir Pendentes
+    filtro = (todos_agendamentos['horario'].dt.date == data_selecionada) & \
+             (todos_agendamentos['status'].isin(['Confirmado', 'Pendente']))
+             
     agendamentos_do_dia = todos_agendamentos[filtro]
     
     return agendamentos_do_dia.sort_values(by='horario')
@@ -145,7 +169,9 @@ def processar_remarcacao(pin: str, agendamento_id: str, profissional_nome: str, 
         return False, f"Não foi possível remarcar: {msg}"
     
     if atualizar_horario_agendamento(agendamento_id, novo_horario):
-        return True, "Agendamento remarcado com sucesso!"
+        # (Feature 4) Ao remarcar, confirma automaticamente
+        acao_admin_agendamento(agendamento_id, "confirmar_cliente")
+        return True, "Agendamento remarcado e confirmado com sucesso!"
     else:
         return False, "Ocorreu um erro ao tentar remarcar no banco de dados."
 
@@ -162,7 +188,7 @@ def importar_feriados_nacionais(clinic_id: str, ano: int):
                 count += 1
         return count
     except requests.RequestException as e:
-        print(f"Erro ao buscar feriados da API: {e}")
+        print(f"Erro ao buscar feriados da API: {e}", file=sys.stderr)
         return 0
 
 def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_selecionada: date, duracao_servico: int, agendamento_id_excluir: str = None):
@@ -177,13 +203,15 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
 
     profissionais = listar_profissionais(clinic_id)
     profissional_data = next((p for p in profissionais if p['nome'] == profissional_nome), None)
+
     if not profissional_data:
         return []
 
     horarios_trabalho = profissional_data.get('horario_trabalho', {})
     dia_key = DIAS_MAP_WEEKDAY_TO_KEY[data_selecionada.weekday()]
+    
     horario_dia = horarios_trabalho.get(dia_key)
-
+    
     if not horario_dia or not horario_dia.get('ativo'):
         return []
 
@@ -201,14 +229,15 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         agendamentos_individuais_df = agendamentos_existentes_df.copy()
     else:
         agendamentos_individuais_df = agendamentos_existentes_df[agendamentos_existentes_df['turma_id'].isnull()]
-    
+        
     if agendamento_id_excluir and not agendamentos_individuais_df.empty:
         agendamentos_individuais_df = agendamentos_individuais_df[agendamentos_individuais_df['id'] != agendamento_id_excluir]
 
     blocos_ocupados = []
     if not agendamentos_individuais_df.empty:
-        df_confirmados = agendamentos_individuais_df[agendamentos_individuais_df['status'] == 'Confirmado']
-        for _, ag in df_confirmados.iterrows():
+        # (Feature 4) Bloqueia horários Pendentes E Confirmados
+        df_ocupados = agendamentos_individuais_df[agendamentos_individuais_df['status'].isin(['Confirmado', 'Pendente'])]
+        for _, ag in df_ocupados.iterrows():
             inicio = ag['horario']
             duracao = int(ag.get('duracao_min', 30))
             fim = inicio + timedelta(minutes=duracao)
@@ -228,7 +257,7 @@ def gerar_horarios_disponiveis(clinic_id: str, profissional_nome: str, data_sele
         
         if not conflito:
             horarios_disponiveis.append(slot_candidato.time())
-        
+            
         slot_candidato += timedelta(minutes=intervalo_minimo)
 
     horarios_unicos = sorted(list(set(horarios_disponiveis)))
@@ -249,6 +278,7 @@ def gerar_turmas_disponiveis(clinic_id: str, data_selecionada: date, turmas_clin
     feriados = listar_feriados(clinic_id)
     if any(f['data'] == data_selecionada for f in feriados):
         return []
+
     
     dia_semana_key = DIAS_MAP_WEEKDAY_TO_KEY.get(data_selecionada.weekday())
     if not dia_semana_key:
@@ -264,6 +294,7 @@ def gerar_turmas_disponiveis(clinic_id: str, data_selecionada: date, turmas_clin
             if horario_obj <= datetime.now(TZ_SAO_PAULO).time():
                 continue
 
+        # (Feature 4) contar_agendamentos_turma_dia agora conta Pendentes + Confirmados
         vagas_ocupadas = contar_agendamentos_turma_dia(clinic_id, turma['id'], data_selecionada)
         capacidade = turma.get('capacidade_maxima', 0)
         vagas_disponiveis = capacidade - vagas_ocupadas
@@ -289,7 +320,7 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
     df_prof = df_agendamentos[
         (df_agendamentos['profissional_nome'] == profissional_nome) &
         (df_agendamentos['turma_id'].isnull()) & 
-        (df_agendamentos['status'] == 'Confirmado')
+        (df_agendamentos['status'].isin(['Confirmado', 'Pendente'])) # (Feature 4) Mostra pendentes
     ].copy()
     
     if df_prof.empty:
@@ -307,6 +338,7 @@ def gerar_visao_semanal(clinic_id: str, profissional_nome: str, start_of_week: d
     
     dias_ordem = [DIAS_SEMANA_PT[i] for i in range(7)]
     cols_presentes = [col for col in dias_ordem if col in pivot_table.columns]
+    
     return pivot_table[cols_presentes]
 
 def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: list):
@@ -316,7 +348,7 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
         return pd.DataFrame(index=[], columns=nomes_profissionais).fillna('')
     
     df_dia = df_agendamentos[
-        (df_agendamentos['status'] == 'Confirmado') &
+        (df_agendamentos['status'].isin(['Confirmado', 'Pendente'])) & # (Feature 4) Mostra pendentes
         (df_agendamentos['turma_id'].isnull())
     ].copy()
 
@@ -338,88 +370,33 @@ def gerar_visao_comparativa(clinic_id: str, data: date, nomes_profissionais: lis
             
     return pivot[nomes_profissionais]
 
-# <-- INÍCIO DAS NOVAS FUNÇÕES DE LÓGICA DE PACOTES -->
-
-def buscar_pacotes_validos_cliente(clinic_id: str, cliente_id: str, servico_id: str):
+# --- (Feature 2c) Nova Função ---
+def processar_desligamento_profissional(clinic_id: str, prof_id: str, prof_nome: str):
     """
-    Busca pacotes ativos de um cliente que sejam válidos para um serviço específico.
+    Localiza agendamentos futuros (pendentes/confirmados) de um profissional,
+    marca-os como '[Sem Profissional]' e, em seguida, remove o profissional.
     """
-    if not cliente_id or not servico_id:
-        return []
-
-    # 1. Busca todos os modelos de pacotes da clínica (cacheável se necessário, mas por enquanto busca direto)
-    modelos_pacotes = listar_pacotes_modelos(clinic_id)
-    if not modelos_pacotes:
-        return []
-    
-    # 2. Busca todos os pacotes adquiridos pelo cliente
-    pacotes_cliente = listar_pacotes_do_cliente(clinic_id, cliente_id)
-    if not pacotes_cliente:
-        return []
-    
-    # 3. Filtra os pacotes válidos
-    hoje = datetime.now(TZ_SAO_PAULO)
-    pacotes_validos = []
-
-    for pc in pacotes_cliente:
-        # Filtro 1: Créditos restantes
-        if pc.get('creditos_restantes', 0) <= 0:
-            continue
+    try:
+        # 1. Buscar agendamentos futuros
+        agendamentos_futuros = buscar_agendamentos_futuros_por_profissional(clinic_id, prof_nome)
         
-        # Filtro 2: Data de expiração
-        if pc.get('data_expiracao') < hoje:
-            continue
+        if not agendamentos_futuros:
+            print(f"LOG: Nenhum agendamento futuro encontrado para {prof_nome}. Removendo diretamente.", file=sys.stderr)
         
-        # Filtro 3: Serviço válido
-        # Encontra o modelo do pacote do cliente
-        modelo_id = pc.get('pacote_modelo_id')
-        modelo_correspondente = next((m for m in modelos_pacotes if m['id'] == modelo_id), None)
+        # 2. Desassociar agendamentos
+        count_desassociados = 0
+        for ag in agendamentos_futuros:
+            if desassociar_profissional_agendamento(ag['id']):
+                count_desassociados += 1
         
-        if not modelo_correspondente:
-            continue # Pacote do cliente aponta para um modelo que não existe mais
+        print(f"LOG: {count_desassociados} agendamentos foram desassociados de {prof_nome}.", file=sys.stderr)
 
-        servicos_validos_pacote = modelo_correspondente.get('servicos_validos', [])
-        if servico_id in servicos_validos_pacote:
-            # Pacote válido! Adiciona informação útil do modelo.
-            pc['nome_pacote'] = modelo_correspondente.get('nome', 'Pacote')
-            pacotes_validos.append(pc)
+        # 3. Remover o profissional da coleção 'profissionais'
+        if db_remover_profissional(clinic_id, prof_id):
+            print(f"LOG: Profissional {prof_nome} (ID: {prof_id}) removido com sucesso.", file=sys.stderr)
+            return True, f"Profissional '{prof_nome}' removido. {count_desassociados} agendamentos futuros foram marcados como 'Sem Profissional'."
+        else:
+            return False, "Erro ao remover o cadastro do profissional, mas os agendamentos podem ter sido desassociados."
 
-    # Retorna os pacotes válidos, talvez ordenados pelo que expira primeiro?
-    return sorted(pacotes_validos, key=lambda p: p['data_expiracao'])
-
-
-def associar_pacote_cliente(clinic_id: str, cliente_id: str, pacote_modelo_id: str):
-    """
-    Associa um modelo de pacote a um cliente, calculando datas e créditos.
-    """
-    # 1. Busca o modelo do pacote
-    modelos_pacotes = listar_pacotes_modelos(clinic_id)
-    modelo_pacote = next((m for m in modelos_pacotes if m['id'] == pacote_modelo_id), None)
-    
-    if not modelo_pacote:
-        return False, "Modelo de pacote não encontrado."
-    
-    # 2. Calcula datas
-    data_inicio = datetime.now(TZ_SAO_PAULO)
-    validade_dias = modelo_pacote.get('validade_dias', 30)
-    data_expiracao = data_inicio + timedelta(days=validade_dias)
-    
-    # 3. Prepara os dados da instância do pacote do cliente
-    dados_pacote_cliente = {
-        'pacote_modelo_id': pacote_modelo_id,
-        'nome_pacote_modelo': modelo_pacote.get('nome'), # Salva nome para referência
-        'data_inicio': data_inicio,
-        'data_expiracao': data_expiracao,
-        'creditos_total': modelo_pacote.get('creditos_sessoes', 0),
-        'creditos_restantes': modelo_pacote.get('creditos_sessoes', 0),
-        'servicos_validos_ids': modelo_pacote.get('servicos_validos', []) # Salva para referência
-    }
-    
-    # 4. Salva no banco
-    sucesso = db_associar_pacote_ao_cliente(clinic_id, cliente_id, dados_pacote_cliente)
-    if sucesso:
-        return True, "Pacote associado ao cliente com sucesso."
-    else:
-        return False, "Erro ao salvar o pacote no banco de dados."
-
-# <-- FIM DAS NOVAS FUNÇÕES DE LÓGICA DE PACOTES -->
+    except Exception as e:
+        print(f"ERRO GERAL no processar_desligamento_profissional para {prof_nome
