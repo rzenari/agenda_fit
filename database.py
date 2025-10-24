@@ -4,6 +4,7 @@
 # 2. [SOLUÇÃO CRÍTICA] `buscar_agendamentos_futuros_por_cliente` busca por `cliente_id`.
 # 3. [SOLUÇÃO CRÍTICA] `contar_agendamentos_turma_dia` agora requer `horario_turma` para contar agendamentos apenas no horário exato da aula.
 # 4. [NOVA FUNÇÃO] Adicionada `verificar_cliente_em_turma` para prevenir duplicidade.
+# 5. [NOVA FUNÇÃO] Adicionada `atualizar_profissional_agendamento` para troca de profissional.
 
 import streamlit as st
 import pandas as pd
@@ -381,6 +382,26 @@ def atualizar_horario_agendamento(id_agendamento: str, novo_horario: datetime):
 
         print(f"ERRO AO ATUALIZAR HORÁRIO ({id_agendamento} para {novo_horario}): {e}", file=sys.stderr)
         return False
+
+def atualizar_profissional_agendamento(id_agendamento: str, novo_profissional_nome: str):
+    """
+    Atualiza o nome do profissional de um agendamento.
+    Usado para realocação de compromissos individuais.
+    """
+    try:
+
+        doc_ref = db.collection('agendamentos').document(id_agendamento)
+
+        doc_ref.update({'profissional_nome': novo_profissional_nome})
+
+        print(f"LOG: Agendamento {id_agendamento} realocado para {novo_profissional_nome}.", file=sys.stderr)
+        return True
+
+    except Exception as e:
+
+        print(f"ERRO AO ATUALIZAR PROFISSIONAL ({id_agendamento} para {novo_profissional_nome}): {e}", file=sys.stderr)
+        return False
+
 
 # <-- FUNÇÃO COM LOGS ADICIONADOS -->
 def buscar_agendamentos_futuros_por_cliente(clinic_id: str, cliente_id: str):
