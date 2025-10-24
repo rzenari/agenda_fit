@@ -7,6 +7,7 @@
 # 4. [CORREÇÃO CRÍTICA] Em `handle_agendamento_submission`, adicionado `verificar_cliente_em_turma` para prevenir agendamento duplicado do mesmo cliente na mesma turma.
 # 5. [REESTRUTURAÇÃO] Lógica de criação de cliente novo em `handle_agendamento_submission` movida para garantir que o ID do cliente esteja disponível para o check de duplicidade em turma.
 # 6. [CORREÇÃO CRÍTICA] Importado `verificar_cliente_em_turma`.
+# 7. [BUGFIX] Adicionada importação de `sys` para corrigir `NameError` na função de log de duplicidade.
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -14,6 +15,7 @@ import pandas as pd
 from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 import numpy as np
+import sys # <-- Adicionado para corrigir NameError na função de log
 
 # IMPORTAÇÕES CORRIGIDAS E ADICIONADAS PARA O NOVO MODELO
 from database import (
