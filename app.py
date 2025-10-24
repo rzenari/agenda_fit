@@ -8,6 +8,7 @@
 # 5. [REESTRUTURAÇÃO] Lógica de criação de cliente novo em `handle_agendamento_submission` movida para garantir que o ID do cliente esteja disponível para o check de duplicidade em turma.
 # 6. [CORREÇÃO CRÍTICA] Importado `verificar_cliente_em_turma`.
 # 7. [BUGFIX] Adicionada importação de `sys` para corrigir `NameError` na função de log de duplicidade.
+# 8. [NOVA FEATURE] Adicionada função de troca de profissional para agendamentos individuais.
 
 import streamlit as st
 from datetime import datetime, time, date, timedelta
@@ -42,6 +43,7 @@ from database import (
     remover_turma as db_remover_turma,
     atualizar_turma,
     verificar_cliente_em_turma, # <-- NOVO: Para checagem de duplicidade
+    atualizar_profissional_agendamento, # <-- NOVO: Para troca de profissional
     # Funções para o Super Admin
     listar_clinicas,
     adicionar_clinica,
@@ -488,6 +490,49 @@ def handle_agendamento_submission():
         except: pass
     st.session_state.agenda_cliente_id_selecionado = None
     st.rerun()
+
+def handle_troca_profissional(agendamento_id: str, profissional_antigo: str, novo_profissional_nome: str):
+    """
+    Handler para trocar o profissional de um agendamento individual,
+    verificando a disponibilidade no horário original.
+    """
+    if profissional_antigo == novo_profissional_nome:
+        st.warning("O profissional selecionado já está atribuído a este agendamento.")
+        return
+        
+    # Busca agendamento original para obter dados de horário e duração
+    # Nota: Poderíamos passar mais dados via args, mas buscar garante que o status está correto.
+    from database import buscar_agendamento_por_pin # Usamos o PIN handler, mas precisamos do ID para atualização
+    agendamento_original = next((ag for ag in buscar_agendamentos_por_data(st.session_state.clinic_id, st.session_state.filter_data_selecionada).to_dict('records') if ag.get('id') == agendamento_id), None)
+    
+    if not agendamento_original:
+        st.error("Agendamento não encontrado para troca.")
+        return
+
+    clinic_id = st.session_state.clinic_id
+    horario_ag = agendamento_original.get('horario')
+    duracao = agendamento_original.get('duracao_min', 30)
+    
+    # 1. Verifica a disponibilidade do NOVO profissional
+    disponivel, msg = verificar_disponibilidade_com_duracao(
+        clinic_id, 
+        novo_profissional_nome, 
+        horario_ag, 
+        duracao,
+        agendamento_id_excluir=agendamento_id # Exclui o próprio agendamento (que está com o prof antigo)
+    )
+
+    if disponivel:
+        # 2. Atualiza o agendamento no banco de dados
+        if atualizar_profissional_agendamento(agendamento_id, novo_profissional_nome):
+            st.success(f"Profissional alterado com sucesso! De {profissional_antigo} para {novo_profissional_nome}.")
+        else:
+            st.error("Erro ao atualizar o profissional no banco de dados.")
+    else:
+        st.error(f"Não foi possível trocar para {novo_profissional_nome}: {msg}")
+        
+    st.rerun() # Força a atualização da lista
+
 
 def handle_salvar_horarios_profissional(prof_id):
     """Salva a configuração de horários de um profissional."""
@@ -1054,6 +1099,9 @@ def render_backoffice_clinica():
     servicos_clinica = listar_servicos(clinic_id)
     # Passa as listas para `listar_turmas` popular nomes
     turmas_clinica = listar_turmas(clinic_id, profissionais_clinica, servicos_clinica)
+    
+    # Lista de nomes de profissionais para o selectbox de troca
+    profissionais_nomes = [p.get('nome','Prof. Inválido') for p in profissionais_clinica]
 
     # Define as abas disponíveis
     tab_options = ["🗓️ Agenda e Agendamento", "📅 Gerenciar Turmas", "🛍️ Gerenciar Pacotes", "📈 Dashboard", "👤 Gerenciar Clientes", "📋 Gerenciar Serviços", "👥 Gerenciar Profissionais", "⚙️ Configurações"]
@@ -1312,9 +1360,11 @@ def render_backoffice_clinica():
                         ag_id = row.get('id', f"NO_ID_{row.get('cliente')}") # Usa ID ou fallback
                         horario_ag = row.get('horario')
                         horario_ag_str = horario_ag.strftime('%H:%M') if isinstance(horario_ag, datetime) else "HH:MM"
+                        profissional_nome = row.get('profissional_nome', 'N/A') # Nome do profissional atual
 
                         # Layout das colunas para cada agendamento
-                        data_cols = st.columns([0.1, 0.4, 0.3, 0.3])
+                        # Ajustado para 6 colunas para incluir o botão de Troca (Shift)
+                        data_cols = st.columns([0.1, 0.35, 0.25, 0.3]) 
 
                         # Checkbox de seleção (coluna 0)
                         selecionado = data_cols[0].checkbox(" ", key=f"select_{ag_id}", label_visibility="collapsed")
@@ -1323,28 +1373,27 @@ def render_backoffice_clinica():
                         # Info Cliente/Serviço (coluna 1)
                         data_cols[1].write(f"**{row.get('cliente','N/A')}**<br><small>{row.get('servico_nome', 'N/A')}</small>", unsafe_allow_html=True)
                         # Info Profissional/Hora (coluna 2)
-                        data_cols[2].write(f"{row.get('profissional_nome','N/A')} - {horario_ag_str}")
+                        data_cols[2].write(f"{profissional_nome} - {horario_ag_str}")
 
                         # Botões de Ação (coluna 3)
                         with data_cols[3]:
-                            action_cols = st.columns(5) # 5 botões de ação
+                            # 6 colunas internas para os botões de ação e a troca
+                            action_cols = st.columns(6) 
 
                             # Popover Detalhes (ℹ️)
-                            # CORREÇÃO: Removido 'key' do popover
                             detalhes_popover = action_cols[0].popover("ℹ️", help="Ver Detalhes")
                             with detalhes_popover:
                                 pin = row.get('pin_code', 'N/A')
                                 link = f"https://agendafit.streamlit.app?pin={pin}" if pin != 'N/A' else 'N/A'
                                 st.markdown(f"**Serviço:** {row.get('servico_nome', 'N/A')}")
                                 st.markdown(f"**Telefone:** {row.get('telefone', 'N/A')}")
+                                st.markdown(f"**Profissional:** {profissional_nome}")
                                 st.markdown(f"**PIN:** `{pin}`")
                                 st.markdown(f"**Link:** `{link}`")
-                                # Mostra se usou pacote
                                 if pd.notna(row.get('pacote_cliente_id')):
                                     st.markdown(f"**Usou Pacote:** Sim")
 
                             # Popover WPP (💬)
-                            # CORREÇÃO: Removido 'key' do popover
                             wpp_popover = action_cols[1].popover("💬", help="Gerar Mensagem WhatsApp")
                             with wpp_popover:
                                 pin = row.get('pin_code', 'N/A')
@@ -1352,11 +1401,10 @@ def render_backoffice_clinica():
                                 horario_str_msg = horario_ag.strftime('%d/%m/%Y às %H:%M') if isinstance(horario_ag, datetime) else "Data/Hora Inválida"
                                 mensagem = (
                                     f"Olá, {row.get('cliente','Cliente')}! Tudo bem?\n\n"
-                                    f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {row.get('profissional_nome','N/A')} "
+                                    f"Este é um lembrete do seu agendamento na {st.session_state.clinic_name} com o(a) profissional {profissional_nome} "
                                     f"no dia {horario_str_msg}.\n\n"
                                     f"Para confirmar, remarcar ou cancelar, por favor, use este link: {link_gestao}"
                                 )
-                                # Usa a chave única no text_area
                                 st.text_area("Mensagem:", value=mensagem, height=200, key=f"wpp_msg_{ag_id}")
                                 st.write("Copie a mensagem acima e envie para o cliente.")
 
@@ -1364,6 +1412,19 @@ def render_backoffice_clinica():
                             action_cols[2].button("✅", key=f"finish_{ag_id}", on_click=handle_admin_action, args=(ag_id, "finalizar"), help="Sessão Concluída")
                             action_cols[3].button("🚫", key=f"noshow_{ag_id}", on_click=handle_admin_action, args=(ag_id, "no-show"), help="Marcar Falta")
                             action_cols[4].button("❌", key=f"cancel_{ag_id}", on_click=handle_admin_action, args=(ag_id, "cancelar"), help="Cancelar Agendamento")
+                            
+                            # Botão de Troca de Profissional (Transferência) - SÓ PARA INDIVIDUAIS
+                            troca_popover = action_cols[5].popover("🔄", help="Trocar Profissional")
+                            with troca_popover:
+                                st.write(f"Trocar profissional de **{row.get('cliente','N/A')}**")
+                                novo_prof_select = st.selectbox(
+                                    "Novo Profissional:",
+                                    options=[p for p in profissionais_nomes if p != profissional_nome], # Exclui o atual
+                                    key=f"troca_prof_select_{ag_id}"
+                                )
+                                if st.button("Confirmar Troca", key=f"troca_btn_{ag_id}", type="primary"):
+                                    handle_troca_profissional(ag_id, profissional_nome, novo_prof_select)
+
 
                         # Mostra se usou pacote abaixo do agendamento
                         if row.get('pacote_cliente_id'):
@@ -1644,7 +1705,7 @@ def render_backoffice_clinica():
                     df_dashboard['data'] = df_dashboard['horario'].dt.date
                     # Agrupa por data e conta agendamentos
                     atendimentos_por_dia = df_dashboard.groupby('data').size().reset_index(name='contagem')
-                    atendimentos_por_dia = atendimentos_por_dia.sort_values('data') # Ordena por data
+                    atendimentos_por_dia = atendendimentos_por_dia.sort_values('data') # Ordena por data
                     # Cria e plota o gráfico de linha
                     fig_line = go.Figure(data=go.Scatter(x=atendimentos_por_dia['data'], y=atendimentos_por_dia['contagem'], mode='lines+markers'))
                     fig_line.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0), xaxis_title="Data", yaxis_title="Nº de Atendimentos")
